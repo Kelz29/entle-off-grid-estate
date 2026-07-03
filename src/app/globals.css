@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+:root {
+  --eoe-ivory: #fbf7f2;
+  --eoe-espresso: #4a2c19;
+  --eoe-gold: #d1b37a;
+  --eoe-sage: #b3c0ae;
+  --eoe-ink: #22221f;
+}
+
+@theme inline {
+  --color-eoe-ivory: var(--eoe-ivory);
+  --color-eoe-espresso: var(--eoe-espresso);
+  --color-eoe-gold: var(--eoe-gold);
+  --color-eoe-sage: var(--eoe-sage);
+  --color-eoe-ink: var(--eoe-ink);
+
+  --font-sans: var(--font-dm-sans);
+  --font-display: var(--font-cormorant);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--eoe-ivory);
+  color: var(--eoe-ink);
+}
+
+/* Booking calendar sizing + aesthetics */
+.booking-calendar {
+  height: 100%;
+}
+
+.booking-calendar .react-datepicker {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+}
+
+.booking-calendar .react-datepicker__month-container {
+  width: 100%;
+}
+
+.booking-calendar .react-datepicker__month {
+  margin: 0;
+}
+
+.booking-calendar .react-datepicker__header {
+  background: transparent;
+  border-bottom: 1px solid rgba(59, 35, 20, 0.08);
+  padding-top: 0.75rem;
+}
+
+.booking-calendar .react-datepicker__day-names {
+  margin-top: 0.25rem;
+}
+
+.booking-calendar .react-datepicker__day-name,
+.booking-calendar .react-datepicker__day {
+  width: 2.7rem;
+  line-height: 2.7rem;
+  margin: 0.1rem;
+}
+
+.booking-calendar .react-datepicker__day--selected,
+.booking-calendar .react-datepicker__day--keyboard-selected {
+  background-color: var(--eoe-espresso);
+  color: var(--eoe-ivory);
+}
