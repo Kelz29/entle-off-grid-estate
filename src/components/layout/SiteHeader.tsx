@@ -8,6 +8,7 @@ const navItems = [
   { href: "#estate", label: "The Estate" },
   { href: "#spaces", label: "Spaces" },
   { href: "#experiences", label: "Experiences" },
+  { href: "#food", label: "The Table" },
   { href: "#booking", label: "Book" },
   { href: "#gallery", label: "Gallery" },
   { href: "#contact", label: "Contact" },

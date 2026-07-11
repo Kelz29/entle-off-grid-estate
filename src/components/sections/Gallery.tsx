@@ -1,90 +1,65 @@
 "use client";
 
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import Image from "next/image";
-
-const items = [
-  "https://images.unsplash.com/photo-1514933651103-005eec06c04b?auto=format&fit=crop&w=1200&q=80",
-  "https://images.unsplash.com/photo-1470770903676-69b98201ea1c?auto=format&fit=crop&w=1200&q=80",
-  "https://images.unsplash.com/photo-1472396961693-142e6e269027?auto=format&fit=crop&w=1200&q=80",
-  "https://images.unsplash.com/photo-1485808191679-5f86510681a2?auto=format&fit=crop&w=1200&q=80",
-  "https://images.unsplash.com/photo-1485182708500-e8f1f318ba72?auto=format&fit=crop&w=1200&q=80",
-  "https://images.unsplash.com/photo-1514933651103-005eec06c04b?auto=format&fit=crop&w=1200&q=80",
-];
+import { gallery } from "@/lib/media";
+import { Lightbox, type MediaItem } from "@/components/ui/Lightbox";
 
 export function Gallery() {
-  const [active, setActive] = useState<string | null>(null);
+  const [active, setActive] = useState<MediaItem | null>(null);
 
   return (
     <section
       id="gallery"
-      className="border-t border-eoe-espresso/10 bg-eoe-espresso/95 px-2 py-20 text-eoe-ivory md:px-4"
+      className="border-t border-eoe-espresso/10 bg-eoe-espresso px-4 py-20 text-eoe-ivory md:px-6"
     >
-      <div className="mx-auto max-w-6xl px-2">
+      <div className="mx-auto max-w-6xl">
         <div className="mb-8 flex items-baseline justify-between gap-4">
           <div>
-            <p className="text-xs tracking-[0.3em] text-eoe-ivory/70">
-              GALLERY
-            </p>
+            <p className="text-xs tracking-[0.3em] text-eoe-ivory/70">GALLERY</p>
             <h2 className="mt-3 font-display text-3xl tracking-[0.18em] md:text-4xl">
               A wall of moments.
             </h2>
           </div>
           <p className="hidden max-w-sm text-sm leading-relaxed text-eoe-ivory/80 md:block">
-            A living archive of the estate—sunrise mist, tables set for celebration, and the
-            quiet in between.
+            A living archive of the estate—sunrise mist, tables set for
+            celebration, and the quiet in between.
           </p>
         </div>
 
-        <div className="columns-2 gap-4 sm:columns-3 md:gap-5">
-          {items.map((src) => (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:gap-4 lg:grid-cols-4">
+          {gallery.map((photo, index) => (
             <motion.button
-              key={src}
+              key={photo.src}
               type="button"
-              onClick={() => setActive(src)}
+              onClick={() =>
+                setActive({ type: "image", src: photo.src, caption: photo.caption })
+              }
+              initial={{ opacity: 0, y: 24 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.15 }}
+              transition={{ duration: 0.5, ease: "easeOut", delay: (index % 4) * 0.05 }}
               whileHover={{ y: -4 }}
-              className="mb-4 inline-block overflow-hidden rounded-3xl border border-eoe-ivory/10 focus:outline-none"
+              className="group relative aspect-[3/4] overflow-hidden rounded-2xl border border-eoe-ivory/10 focus:outline-none"
             >
-              <div className="relative h-56 w-full sm:h-72 md:h-80">
-                <Image
-                  src={src}
-                  alt="Entle Off-Grid Estate"
-                  fill
-                  className="object-cover transition-transform duration-[2200ms] hover:scale-105"
-                />
-              </div>
+              <Image
+                src={photo.src}
+                alt={photo.alt}
+                fill
+                sizes="(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw"
+                className="object-cover transition-transform duration-[2200ms] group-hover:scale-105"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-eoe-ink/70 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+              <p className="absolute bottom-3 left-3 right-3 translate-y-2 text-[10px] uppercase tracking-[0.2em] text-eoe-ivory/90 opacity-0 transition-all group-hover:translate-y-0 group-hover:opacity-100">
+                {photo.caption}
+              </p>
             </motion.button>
           ))}
         </div>
-
-        <AnimatePresence>
-          {active && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4"
-              onClick={() => setActive(null)}
-            >
-              <motion.div
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
-                className="relative max-h-[80vh] w-full max-w-3xl overflow-hidden rounded-3xl border border-eoe-ivory/10 bg-eoe-ink"
-              >
-                <Image
-                  src={active}
-                  alt="Entle Off-Grid Estate detail"
-                  fill
-                  className="object-cover"
-                />
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
+
+      <Lightbox item={active} onClose={() => setActive(null)} />
     </section>
   );
 }
-

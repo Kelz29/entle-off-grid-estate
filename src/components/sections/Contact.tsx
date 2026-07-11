@@ -67,14 +67,21 @@ export function Contact() {
             <p className="text-xs uppercase tracking-[0.22em] text-eoe-ivory/60">
               Find us
             </p>
-            <div className="h-40 w-full overflow-hidden rounded-2xl border border-eoe-ivory/20 bg-eoe-ink/70 text-[11px] text-eoe-ivory/70">
-              {/* Google Maps embed placeholder */}
-              <div className="flex h-full items-center justify-center px-4 text-center">
-                Styled Google Map
-                <br />
-                (embed here)
-              </div>
-            </div>
+            <p className="text-eoe-ivory">
+              183 Lakeview,
+              <br />
+              Bloemfontein, South Africa
+            </p>
+            <a
+              href="https://maps.google.com/?q=183+Lakeview,+Bloemfontein,+South+Africa"
+              target="_blank"
+              rel="noreferrer"
+              className="block h-40 w-full overflow-hidden rounded-2xl border border-eoe-ivory/20 bg-eoe-ink/70 text-[11px] text-eoe-ivory/70 transition hover:border-eoe-gold/50"
+            >
+              <span className="flex h-full items-center justify-center px-4 text-center underline-offset-4 hover:underline">
+                Open in Google Maps →
+              </span>
+            </a>
           </div>
         </motion.div>
 

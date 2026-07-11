@@ -1,23 +1,26 @@
 "use client";
 
 import { motion } from "framer-motion";
-import Image from "next/image";
+import { hero } from "@/lib/media";
 
 export function Hero() {
   return (
     <section
       id="top"
-      className="relative flex min-h-screen flex-col justify-end overflow-hidden bg-eoe-ivory text-eoe-ink"
+      className="relative flex min-h-screen flex-col justify-end overflow-hidden bg-eoe-ink text-eoe-ink"
     >
       <div className="pointer-events-none absolute inset-0">
-        <Image
-          src="https://images.unsplash.com/photo-1470770903676-69b98201ea1c?auto=format&fit=crop&w=1600&q=80"
-          alt="Misty South African landscape around an off-grid estate"
-          fill
-          priority
-          className="object-cover opacity-80"
+        <video
+          className="h-full w-full object-cover"
+          src={hero.video}
+          poster={hero.poster}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-eoe-ink/70 via-eoe-ink/30 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-eoe-ink/85 via-eoe-ink/35 to-eoe-ink/30" />
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-soft-light" />
       </div>
 
@@ -26,16 +29,16 @@ export function Hero() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, ease: "easeOut" }}
-          className="mb-4 text-xs tracking-[0.35em] text-eoe-ivory/70"
+          className="mb-4 text-xs tracking-[0.35em] text-eoe-ivory/85"
         >
-          OFF-GRID ESTATE • SOUTH AFRICA
+          OFF-GRID ESTATE • 15 MIN FROM THE CITY
         </motion.p>
 
         <motion.h1
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 1, ease: "easeOut", delay: 0.05 }}
-          className="font-display text-[10vw] leading-[0.9] tracking-[0.22em] text-eoe-ivory md:text-[7vw]"
+          className="font-display text-[11vw] leading-[0.9] tracking-[0.18em] text-eoe-ivory md:text-[7vw]"
         >
           An escape
           <br />
@@ -48,10 +51,10 @@ export function Hero() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
-          className="mt-6 max-w-xl text-sm text-eoe-ivory/80 md:text-base"
+          className="mt-6 max-w-xl text-sm text-eoe-ivory/85 md:text-base"
         >
           <p>
-            A private estate, off-grid cafe, and considered venue for gatherings
+            A private estate, off-grid café, and considered venue for gatherings
             that feel both intimate and quietly cinematic.
           </p>
         </motion.div>
@@ -64,7 +67,7 @@ export function Hero() {
         >
           <a
             href="#booking"
-            className="rounded-full border border-eoe-gold bg-eoe-gold px-6 py-3 text-xs font-semibold tracking-[0.22em] text-eoe-espresso hover:bg-eoe-gold/90"
+            className="rounded-full border border-eoe-gold bg-eoe-gold px-6 py-3 text-xs font-semibold tracking-[0.22em] text-eoe-ivory hover:bg-eoe-gold/90"
           >
             BOOK A DATE
           </a>
@@ -93,4 +96,3 @@ export function Hero() {
     </section>
   );
 }
-

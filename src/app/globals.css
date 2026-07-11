@@ -1,11 +1,13 @@
 @import "tailwindcss";
 
 :root {
-  --eoe-ivory: #fbf7f2;
-  --eoe-espresso: #4a2c19;
-  --eoe-gold: #d1b37a;
+  /* Clay + white palette. `espresso` and `gold` are unified to the clay brand
+     colour; buttons that fill with it use white text (see components). */
+  --eoe-ivory: #ffffff;
+  --eoe-espresso: #9a6552;
+  --eoe-gold: #9a6552;
   --eoe-sage: #b3c0ae;
-  --eoe-ink: #22221f;
+  --eoe-ink: #2a1a12;
 }
 
 @theme inline {
