@@ -62,6 +62,9 @@ export async function POST(request: Request) {
     );
   }
 
+  // Deposit is per guest: charged total = price_cents × party size.
+  const guests = parsed.guests ?? 1;
+
   // 1. Reserve the slot as a pending booking (409 before we create a checkout).
   let bookingId: number;
   try {
@@ -70,7 +73,7 @@ export async function POST(request: Request) {
       service,
       startTime: parsed.startTime,
       invitee: parsed.invitee,
-      guests: parsed.guests,
+      guests,
       notes: parsed.notes,
       status: "pending",
     });
@@ -88,7 +91,7 @@ export async function POST(request: Request) {
   // 2. Create the hosted checkout.
   try {
     const checkout = await createCheckout({
-      amountInCents: service.price_cents,
+      amountInCents: service.price_cents * guests,
       successUrl: `${APP_BASE_URL}/booking/success?booking=${bookingId}`,
       cancelUrl: `${APP_BASE_URL}/booking/cancelled?booking=${bookingId}`,
       failureUrl: `${APP_BASE_URL}/booking/failed?booking=${bookingId}`,

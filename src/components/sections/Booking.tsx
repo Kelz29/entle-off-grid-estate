@@ -69,6 +69,12 @@ export function Booking() {
     remaining: number;
     requested: number;
   } | null>(null);
+  // Non-refundable-deposit notice shown before handing off to Yoco.
+  const [confirmPay, setConfirmPay] = useState(false);
+
+  // Deposit is per guest: total = price_cents × party size.
+  const guestCount = Math.max(1, Math.trunc(Number(guests)) || 1);
+  const depositTotal = service ? service.price_cents * guestCount : 0;
 
   // Load event types.
   useEffect(() => {
@@ -122,12 +128,21 @@ export function Booking() {
     if (!service || !slot) return;
 
     // Café slots are shared — don't let the party exceed the seats left.
-    const wanted = Number(guests) || 1;
-    if (!service.exclusive && wanted > slot.invitees_remaining) {
-      setSeatWarn({ remaining: slot.invitees_remaining, requested: wanted });
+    if (!service.exclusive && guestCount > slot.invitees_remaining) {
+      setSeatWarn({
+        remaining: slot.invitees_remaining,
+        requested: guestCount,
+      });
       return;
     }
 
+    // Warn that the deposit is non-refundable before redirecting to Yoco.
+    setConfirmPay(true);
+  };
+
+  const startCheckout = async () => {
+    if (!service || !slot) return;
+    setConfirmPay(false);
     setSubmitting(true);
     setError(null);
 
@@ -141,7 +156,7 @@ export function Booking() {
           event_type: service.uri,
           start_time: slot.start_time,
           invitee: { name, email, phone: phone || undefined },
-          guests: Number(guests) || 1,
+          guests: guestCount,
           notes: notes || undefined,
         }),
       });
@@ -196,8 +211,8 @@ export function Booking() {
             <span className="font-medium text-eoe-espresso">
               Friday–Sunday, 11:00–18:00
             </span>
-            . A R150 deposit secures your slot and comes off your bill on the
-            day.
+            . A R100 per-guest deposit secures your slot and comes off your
+            bill on the day.
           </p>
         </div>
 
@@ -225,9 +240,9 @@ export function Booking() {
                   <p className="mt-1 flex items-start gap-2 text-sm text-eoe-ivory/80">
                     <span aria-hidden>💳</span>
                     <span>
-                      {money(service.price_cents)} deposit
+                      {money(service.price_cents)} deposit per guest
                       <span className="block text-xs text-eoe-ivory/55">
-                        Goes towards your bill on arrival
+                        Non-refundable — goes towards your bill on arrival
                       </span>
                     </span>
                   </p>
@@ -347,10 +362,12 @@ export function Booking() {
                   >
                     {submitting
                       ? "Redirecting to Yoco…"
-                      : `Pay ${money(service.price_cents)} deposit & confirm`}
+                      : `Pay ${money(depositTotal)} deposit & confirm`}
                   </button>
                   <p className="mt-3 text-[11px] text-eoe-espresso/50">
-                    Your {money(service.price_cents)} deposit secures the
+                    Your {money(depositTotal)} deposit (
+                    {money(service.price_cents)} × {guestCount}{" "}
+                    {guestCount === 1 ? "guest" : "guests"}) secures the
                     booking and is deducted from your bill when you arrive.
                     You&apos;ll be taken to Yoco&apos;s secure checkout — test
                     card 4111 1111 1111 1111, any future expiry &amp; CVV.
@@ -364,6 +381,62 @@ export function Booking() {
           </div>
         </motion.div>
       </div>
+
+      {/* Non-refundable deposit notice — shown before redirecting to Yoco */}
+      <AnimatePresence>
+        {confirmPay && service && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setConfirmPay(false)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-eoe-ink/45 px-4 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 8 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 8 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm rounded-3xl border border-eoe-espresso/10 bg-white p-7 text-center shadow-2xl"
+            >
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-2xl">
+                💳
+              </div>
+              <h4 className="mt-4 font-display text-2xl tracking-wide text-eoe-espresso">
+                Before you pay
+              </h4>
+              <p className="mt-2 text-sm leading-relaxed text-eoe-espresso/75">
+                Your{" "}
+                <span className="font-semibold text-eoe-espresso">
+                  {money(depositTotal)}
+                </span>{" "}
+                deposit ({money(service.price_cents)} × {guestCount}{" "}
+                {guestCount === 1 ? "guest" : "guests"}) is{" "}
+                <span className="font-semibold text-eoe-espresso">
+                  non-refundable
+                </span>
+                . It secures your booking and is deducted from your bill when
+                you arrive.
+              </p>
+              <div className="mt-6 flex flex-col gap-2">
+                <button
+                  onClick={startCheckout}
+                  className="rounded-full bg-eoe-espresso px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-ivory hover:bg-eoe-espresso/90"
+                >
+                  I understand — pay {money(depositTotal)}
+                </button>
+                <button
+                  onClick={() => setConfirmPay(false)}
+                  className="rounded-full border border-eoe-espresso/20 px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-espresso hover:bg-eoe-ivory"
+                >
+                  Go back
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {seatWarn && slot && (
@@ -480,7 +553,7 @@ function ServiceStep({
                   {s.name}
                 </span>
                 <span className="block text-xs text-eoe-espresso/60">
-                  {s.duration} min · {money(s.price_cents)}
+                  {s.duration} min · {money(s.price_cents)} per guest
                 </span>
               </span>
             </span>

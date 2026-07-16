@@ -22,6 +22,7 @@ type ScheduledEvent = {
   guests: number;
   notes: string | null;
   payment_status: string;
+  pay_on_arrival?: boolean;
   payment_provider: string;
   payment_amount_cents?: number | null;
   seen: boolean;
@@ -44,6 +45,10 @@ function bookingId(uri: string) {
 }
 function serviceId(uri: string) {
   return uri.split("/").pop() ?? "";
+}
+// Placeholder addresses from manual (phone) bookings aren't worth showing.
+function displayEmail(email: string) {
+  return email.endsWith("@noemail.local") ? "" : email;
 }
 function money(cents?: number | null) {
   if (!cents) return "R0";
@@ -121,6 +126,7 @@ export default function AdminPage() {
     fetcher
   );
   const [showSeats, setShowSeats] = useState(false);
+  const [showNew, setShowNew] = useState(false);
 
   const all = useMemo(() => data?.collection ?? [], [data]);
   const types = useMemo(() => typesData?.collection ?? [], [typesData]);
@@ -149,7 +155,7 @@ export default function AdminPage() {
         if (key >= today) upcoming++;
         if (key === today) todayCount++;
         if (b.payment_status === "paid") deposits += b.payment_amount_cents ?? 0;
-        else awaiting++;
+        else if (!b.pay_on_arrival) awaiting++; // manual bookings settle at the venue
       }
     }
     return {
@@ -323,13 +329,19 @@ export default function AdminPage() {
               onMarkAll={markAllSeen}
             />
             <button
+              onClick={() => setShowNew(true)}
+              className="rounded-full bg-eoe-espresso px-4 py-2 text-[11px] uppercase tracking-[0.22em] text-eoe-ivory transition hover:bg-eoe-espresso/90"
+            >
+              ＋ New booking
+            </button>
+            <button
               onClick={() => setShowSeats((v) => !v)}
               className="rounded-full border border-eoe-espresso/20 px-4 py-2 text-[11px] uppercase tracking-[0.22em] text-eoe-espresso transition hover:bg-eoe-espresso/5"
             >
               Manage seats
             </button>
             <button
-              onClick={() => mutate()}
+              onClick={() => window.location.reload()}
               className="rounded-full border border-eoe-gold px-4 py-2 text-[11px] uppercase tracking-[0.22em] text-eoe-espresso transition hover:bg-eoe-gold/15"
             >
               ↻ Refresh
@@ -339,6 +351,17 @@ export default function AdminPage() {
 
         {showSeats && (
           <SeatSettings services={types} onSaved={() => mutateTypes()} />
+        )}
+
+        {showNew && (
+          <NewBookingModal
+            types={types}
+            onClose={() => setShowNew(false)}
+            onCreated={async () => {
+              setShowNew(false);
+              await mutate();
+            }}
+          />
         )}
 
         {!ADMIN_TOKEN && (
@@ -557,7 +580,11 @@ function NotificationsBell({
                       <span className="block text-[11px] text-eoe-espresso/40">
                         {relTime(b.created_at)}
                         {b.status === "canceled" ? " · cancelled" : ""}
-                        {b.payment_status === "paid" ? " · paid" : ""}
+                        {b.payment_status === "paid"
+                          ? " · paid"
+                          : b.pay_on_arrival
+                          ? " · pays at restaurant"
+                          : ""}
                       </span>
                     </span>
                   </button>
@@ -567,6 +594,300 @@ function NotificationsBell({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// ---------- manual booking (phone / WhatsApp / walk-in) ----------
+// Creates a booking through the payment-free Calendly POST — no checkout, the
+// guest settles on arrival. Email is optional (call-in guests often have none);
+// a placeholder @noemail.local address satisfies the API and is never mailed.
+function NewBookingModal({
+  types,
+  onClose,
+  onCreated,
+}: {
+  types: EventType[];
+  onClose: () => void;
+  onCreated: () => Promise<void>;
+}) {
+  const [sid, setSid] = useState(types[0] ? serviceId(types[0].uri) : "");
+  const [date, setDate] = useState(venueTodayKey());
+  const [times, setTimes] = useState<
+    { start_time: string; invitees_remaining: number }[]
+  >([]);
+  const [timesLoading, setTimesLoading] = useState(false);
+  const [slot, setSlot] = useState<string | null>(null);
+
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [guests, setGuests] = useState("2");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const type = types.find((t) => serviceId(t.uri) === sid);
+  const shared = type?.exclusive === false;
+
+  useEffect(() => {
+    if (!sid || !date) return;
+    let alive = true;
+    const load = async () => {
+      setTimesLoading(true);
+      setSlot(null);
+      const end = addDaysKey(date, 1);
+      try {
+        const r = await fetch(
+          `/api/v1/calendly/event_type_available_times?event_type=${sid}` +
+            `&start_time=${date}T00:00:00Z&end_time=${end}T00:00:00Z`
+        );
+        const d = r.ok ? await r.json() : { collection: [] };
+        if (alive) setTimes(d.collection ?? []);
+      } catch {
+        if (alive) setTimes([]);
+      } finally {
+        if (alive) setTimesLoading(false);
+      }
+    };
+    load();
+    return () => {
+      alive = false;
+    };
+  }, [sid, date]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!slot) {
+      setError("Pick a time slot first.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const digits = phone.replace(/\D/g, "");
+    const fallbackEmail = `guest-${digits || Date.now()}@noemail.local`;
+    const res = await fetch(`/api/v1/calendly/scheduled_events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event_type: sid,
+        start_time: slot,
+        invitee: {
+          name,
+          email: email.trim() || fallbackEmail,
+          phone: phone || undefined,
+        },
+        guests: Math.max(1, Number(guests) || 1),
+        notes: notes.trim() || undefined,
+      }),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      setError(
+        res.status === 409
+          ? "That slot is full or taken — pick another time."
+          : b.detail ?? "Could not create the booking."
+      );
+      setBusy(false);
+      return;
+    }
+    // Admin created it themselves — mark it seen so the bell stays quiet.
+    const created = await res.json().catch(() => null);
+    const uri: string | undefined = created?.resource?.uri;
+    if (uri) {
+      await fetch(
+        `/api/v1/calendly/scheduled_events/${bookingId(uri)}?token=${ADMIN_TOKEN}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ seen: true }),
+        }
+      ).catch(() => {});
+    }
+    setBusy(false);
+    await onCreated();
+  };
+
+  const inputCls =
+    "w-full rounded-full border border-eoe-espresso/15 bg-white px-3.5 py-2 text-sm text-eoe-espresso outline-none focus:border-eoe-gold";
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-eoe-ink/45 px-4 py-10 backdrop-blur-sm"
+    >
+      <form
+        onSubmit={submit}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg rounded-3xl border border-eoe-espresso/10 bg-white p-7 shadow-2xl"
+      >
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="font-display text-2xl tracking-wide text-eoe-espresso">
+              New booking
+            </h2>
+            <p className="mt-1 text-xs leading-relaxed text-eoe-espresso/55">
+              For guests booking by phone or message. No payment is taken —
+              the booking is created as awaiting payment and the guest settles
+              on arrival.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full px-2 text-lg leading-none text-eoe-espresso/40 hover:text-eoe-espresso"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <label className="block sm:col-span-2">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+              Experience
+            </span>
+            <select value={sid} onChange={(e) => setSid(e.target.value)} className={inputCls}>
+              {types.map((t) => (
+                <option key={t.uri} value={serviceId(t.uri)}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+              Date
+            </span>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className={inputCls}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+              Guests
+            </span>
+            <input
+              type="number"
+              min={1}
+              value={guests}
+              onChange={(e) => setGuests(e.target.value)}
+              className={inputCls}
+            />
+          </label>
+        </div>
+
+        <div className="mt-4">
+          <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+            Time
+          </span>
+          <div className="flex flex-wrap gap-2">
+            {timesLoading && (
+              <p className="text-xs text-eoe-espresso/50">Loading…</p>
+            )}
+            {!timesLoading && times.length === 0 && (
+              <p className="text-xs text-eoe-espresso/50">
+                Closed / no open times on this day.
+              </p>
+            )}
+            {times.map((t) => (
+              <button
+                key={t.start_time}
+                type="button"
+                onClick={() => setSlot(t.start_time)}
+                className={`flex flex-col items-center rounded-xl border px-3 py-1.5 text-sm transition ${
+                  slot === t.start_time
+                    ? "border-eoe-espresso bg-eoe-espresso text-eoe-ivory"
+                    : "border-eoe-espresso/20 text-eoe-espresso hover:border-eoe-gold"
+                }`}
+              >
+                {timeOf(t.start_time)}
+                {shared && (
+                  <span
+                    className={`text-[10px] ${
+                      slot === t.start_time
+                        ? "text-eoe-ivory/70"
+                        : "text-eoe-espresso/45"
+                    }`}
+                  >
+                    {t.invitees_remaining} seats
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="block sm:col-span-2">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+              Guest name
+            </span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              className={inputCls}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+              Phone
+            </span>
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              maxLength={20}
+              className={inputCls}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+              Email (optional)
+            </span>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className={inputCls}
+            />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+              Notes (optional)
+            </span>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              placeholder="e.g. booked via WhatsApp, window table"
+              className="w-full rounded-2xl border border-eoe-espresso/15 bg-white px-3.5 py-2 text-sm text-eoe-espresso outline-none focus:border-eoe-gold"
+            />
+          </label>
+        </div>
+
+        {error && <p className="mt-3 text-xs text-rose-600">{error}</p>}
+
+        <div className="mt-6 flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-eoe-espresso/20 px-5 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso hover:bg-eoe-ivory"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy || !slot || !name.trim()}
+            className="rounded-full bg-eoe-espresso px-6 py-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-eoe-ivory hover:bg-eoe-espresso/90 disabled:opacity-40"
+          >
+            {busy ? "Creating…" : "Create booking"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -966,6 +1287,9 @@ function statusOf(b: ScheduledEvent) {
     return { label: "Cancelled", cls: "bg-eoe-espresso/8 text-eoe-espresso/50" };
   if (b.payment_status === "paid")
     return { label: "Paid", cls: "bg-emerald-100 text-emerald-700" };
+  // Manual (phone/walk-in) bookings: no online checkout, settled at the venue.
+  if (b.pay_on_arrival)
+    return { label: "Pays at restaurant", cls: "bg-sky-100 text-sky-700" };
   return { label: "Awaiting payment", cls: "bg-amber-100 text-amber-700" };
 }
 
@@ -1087,8 +1411,10 @@ function BookingCard({
             )}
             <p className="mt-1 text-sm text-eoe-espresso/80">{b.invitee.name}</p>
             <p className="text-xs text-eoe-espresso/55">
-              {b.invitee.email}
-              {b.invitee.phone ? ` · ${b.invitee.phone}` : ""}
+              {displayEmail(b.invitee.email)}
+              {b.invitee.phone
+                ? `${displayEmail(b.invitee.email) ? " · " : ""}${b.invitee.phone}`
+                : ""}
             </p>
             {b.notes && (
               <p className="mt-2 max-w-xl whitespace-pre-line rounded-lg bg-eoe-ivory px-3 py-2 text-xs text-eoe-espresso/70">
@@ -1324,13 +1650,15 @@ function TableView({
                 <td className="px-4 py-3">
                   <div>{b.invitee.name}</div>
                   <div className="text-xs text-eoe-espresso/45">
-                    {b.invitee.email}
+                    {displayEmail(b.invitee.email) || b.invitee.phone || ""}
                   </div>
                 </td>
                 <td className="px-4 py-3">{b.guests}</td>
                 <td className="whitespace-nowrap px-4 py-3">
                   {b.payment_status === "paid"
                     ? money(b.payment_amount_cents)
+                    : b.pay_on_arrival
+                    ? "At restaurant"
                     : "—"}
                 </td>
                 <td className="px-4 py-3">

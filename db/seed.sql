@@ -35,6 +35,7 @@ ON CONFLICT (id) DO UPDATE
 SELECT setval('businesses_id_seq', (SELECT MAX(id) FROM businesses));
 
 -- Placeholder event types (the user will refine names/durations/prices later).
+-- price_cents is the deposit PER GUEST (R100); the charged total = price × guests.
 INSERT INTO services
   (business_id, name, slug, description, duration_minutes, buffer_minutes,
    price_cents, color, min_advance_booking_hours, max_advance_booking_days,
@@ -43,11 +44,11 @@ VALUES
   -- Café: shared seating, up to 50 guests may book the same slot.
   (1, 'Cafe Table Reservation', 'cafe-table-reservation',
    'Reserve a table at The Cafe for a relaxed off-grid meal.',
-   120, 15, 15000, '#9A6552', 2, 60, true, true, false, 50),
+   120, 15, 10000, '#9A6552', 2, 60, true, true, false, 50),
   -- Estate Tour / events: exclusive — one booking per slot.
   (1, 'Estate Tour', 'estate-tour',
    'A guided walk through the gardens, venue and private estate.',
-   60, 15, 15000, '#CDA98E', 4, 90, true, true, true, 1)
+   60, 15, 10000, '#CDA98E', 4, 90, true, true, true, 1)
 ON CONFLICT (business_id, slug) DO UPDATE
   SET name = EXCLUDED.name,
       description = EXCLUDED.description,

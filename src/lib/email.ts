@@ -117,7 +117,9 @@ function textFallback(
 
 async function send(to: string, subject: string, heading: string, intro: string, rows: [string, string][], outro?: string): Promise<void> {
   const transport = getTransport();
-  if (!transport || !to) return;
+  // @noemail.local = placeholder for manual (phone/walk-in) bookings made from
+  // the admin dashboard without a real address — never try to mail it.
+  if (!transport || !to || to.endsWith("@noemail.local")) return;
   try {
     await transport.sendMail({
       from: fromAddress(),

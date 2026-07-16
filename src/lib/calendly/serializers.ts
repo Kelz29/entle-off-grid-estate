@@ -79,6 +79,11 @@ export function serializeScheduledEvent(
     guests: booking.guests,
     notes: booking.notes ?? null,
     payment_status: booking.payment_status,
+    // Manual (phone/walk-in) bookings skip checkout entirely: they're created
+    // straight to 'active' while unpaid (website bookings hold as 'pending'
+    // until the Yoco webhook marks them paid). The guest settles at the venue.
+    pay_on_arrival:
+      booking.status === "active" && booking.payment_status === "unpaid",
     payment_provider: booking.payment_provider,
     payment_amount_cents: booking.payment_amount_cents,
     seen: booking.seen,

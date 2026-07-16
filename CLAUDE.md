@@ -55,16 +55,16 @@ Domain model = `businesses` (tenant) → `services` (Calendly "event types": dur
 - **Business logic** in `src/lib/calendly/`: `repository.ts` (all SQL), `availability.ts` (business-hours slot generation, `CALENDLY_API.md` §3), `bookings.ts` (create + conflict handling), `serializers.ts` (row → Calendly JSON), `time.ts` (IANA-timezone math, no date lib), `config.ts` (URI builders, `event_type` URI/bare-id parsing).
 - `src/lib/db.ts` — pooled `pg` client (single pool cached on `globalThis` across hot reloads).
 - `src/components/sections/Booking.tsx` — Calendly-style multi-step widget (pick experience → date + time slot → details → confirm), fetches the API above.
-- `src/app/admin/page.tsx` — client dashboard (SWR, 20s auto-refresh + a Refresh button). KPIs, a 14-day load chart, filters/search, and **agenda + table** views. Per booking: cancel, **reschedule** (inline date/time picker, in both views), and guest-count edit (agenda ✎). Header has a **notifications bell** (new bookings) and a **"Manage seats"** panel (default capacity, per-slot seats). Reads `NEXT_PUBLIC_ADMIN_TOKEN`.
+- `src/app/admin/page.tsx` — client dashboard (SWR, 20s auto-refresh + a Refresh button that reloads the whole page). KPIs, a 14-day load chart, filters/search, and **agenda + table** views. Per booking: cancel, **reschedule** (inline date/time picker, in both views), and guest-count edit (agenda ✎). Header has a **notifications bell** (new bookings), a **"＋ New booking"** modal for manual phone/walk-in bookings (goes through the payment-free Calendly POST, auto-marked seen, badged **"Pays at restaurant"** via the serialized `pay_on_arrival` flag — DB-`active` + `unpaid`, i.e. never went through checkout — and excluded from the "Awaiting payment" KPI; email optional — a `@noemail.local` placeholder is substituted, hidden in the UI and skipped by `email.ts`), and a **"Manage seats"** panel (default capacity, per-slot seats). Reads `NEXT_PUBLIC_ADMIN_TOKEN`.
 
 ### New-booking notifications
 `bookings.seen` (bool, default false) tracks whether admin has viewed a booking. New bookings are unseen; the admin header bell shows the unseen count and lists latest bookings (by `created_at`). Toggle per-booking via `PATCH /scheduled_events/[id]` `{seen}` (`setBookingSeen`); mark all via `PATCH /api/v1/calendly/admin/seen` `{seen}` (`markAllBookingsSeen`). `seen` is exposed on the serialized scheduled event.
 
 ### Payments (Yoco Checkout API + webhooks)
-Every booking made through the website widget is paid up front (deposit = `services.price_cents`). Integration is the **hosted Checkout API** (redirect) with **webhook** confirmation. (The legacy Popup SDK + `/v1/charges` API was sunsetted by Yoco.)
+Every booking made through the website widget is paid up front. The deposit is **per guest**: `services.price_cents` is the per-guest amount (seeded R100) and the charged total = `price_cents × guests`. Integration is the **hosted Checkout API** (redirect) with **webhook** confirmation. (The legacy Popup SDK + `/v1/charges` API was sunsetted by Yoco.)
 
 Flow:
-1. `Booking.tsx` "details" step → `POST /api/bookings/checkout` (no card data).
+1. `Booking.tsx` "details" step → a **non-refundable-deposit confirm modal** (total + per-guest breakdown) → `POST /api/bookings/checkout` (no card data).
 2. `src/app/api/bookings/checkout/route.ts` reserves the slot as a **`pending`** booking (409 if taken — *before* creating a checkout), then `createCheckout` (`src/lib/yoco.ts` → `POST https://payments.yoco.com/api/checkouts`) with our success/cancel/failure URLs + `metadata.bookingId`, stores `checkout_id`, and returns `redirectUrl`. On Yoco error it releases the slot and returns `502`.
 3. Browser redirects to Yoco's hosted page; on completion Yoco redirects to `/booking/{success,cancelled,failed}?booking={id}`.
 4. **`POST /api/payments/yoco/webhook`** verifies the Svix-style signature over the raw body (`verifyWebhookSignature`) and on `payment.succeeded` calls `markBookingPaid` (sets `active` + `paid`, idempotent). This is the authoritative confirmation — **not** the success redirect.
@@ -98,7 +98,7 @@ Each service has a concurrency model (`services.exclusive`, `services.capacity`)
 - **Per-booking guests** — `PATCH /scheduled_events/[id]` `{guests}` (`updateBookingGuests`, re-checks slot capacity for shared), editable inline on each booking card.
 
 ### Editing event types
-Event types are rows in `services`. Seeded (`db/seed.sql`): **Cafe Table Reservation** (shared, capacity 50, 120 min, R150) and **Estate Tour** (exclusive, 60 min, R150) — both `price_cents = 15000`; the R150 is a **deposit deducted from the bill on arrival** (widget/emails say so). Change offerings/durations/prices/hours by editing `services` rows and `business_hours` in `businesses.settings`; the API and UI pick them up with no code change. Capacity and per-slot seats are editable in the admin "Manage seats" panel, but there's no admin UI for full service CRUD (name/price/duration).
+Event types are rows in `services`. Seeded (`db/seed.sql`): **Cafe Table Reservation** (shared, capacity 50, 120 min) and **Estate Tour** (exclusive, 60 min) — both `price_cents = 10000`; that R100 is a **per-guest, non-refundable deposit deducted from the bill on arrival** (total charged = R100 × guests; widget/emails say so). Change offerings/durations/prices/hours by editing `services` rows and `business_hours` in `businesses.settings`; the API and UI pick them up with no code change. Capacity and per-slot seats are editable in the admin "Manage seats" panel, but there's no admin UI for full service CRUD (name/price/duration).
 
 ## Styling
 
