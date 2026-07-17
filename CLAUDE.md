@@ -72,7 +72,7 @@ Flow:
 
 Separate from the payment-free Calendly `scheduled_events` POST (which stays faithful to `CALENDLY_API.md` §2.6).
 
-**Webhook setup (needs a public URL):** the webhook receiver must be reachable by Yoco, so local dev needs a tunnel (e.g. `ngrok http 3000`). Register once with `YOCO_SECRET_KEY=… node scripts/register-yoco-webhook.mjs https://<public-host>/api/payments/yoco/webhook`, then put the returned `whsec_…` secret in `YOCO_WEBHOOK_SECRET`. Success/cancel/failure redirects go to `APP_BASE_URL` (can be `localhost` — that's the customer's browser). Test card: `4111 1111 1111 1111`, any future expiry & CVV.
+**Webhook setup (needs a public URL):** the webhook receiver must be reachable by Yoco, so local dev needs a tunnel (e.g. `ngrok http 3000`). Register once with `YOCO_SECRET_KEY=… node scripts/register-yoco-webhook.mjs https://<public-host>/api/payments/yoco/webhook`, then put the returned `whsec_…` secret in `YOCO_WEBHOOK_SECRET`. Success/cancel/failure redirects go back to the **origin the booking was made from** (derived per request from `X-Forwarded-Host`/`Host`, so a booking made via the ngrok URL returns to ngrok and one made on `localhost` returns to localhost); `APP_BASE_URL` is only the last-resort fallback. Test card: `4111 1111 1111 1111`, any future expiry & CVV.
 
 **Stale holds:** an abandoned checkout where the customer never returns leaves a `pending` booking holding the slot (the cancel/fail pages release it, but a hard-closed tab won't). A periodic cleanup of old `pending` bookings is a sensible follow-up; none exists yet.
 
@@ -120,7 +120,7 @@ See `.env.example`. Copy it to `.env.local` (gitignored).
 - `YOCO_SECRET_KEY` — server-only Yoco key (`sk_test_…`/`sk_live_…`) for the Checkout API.
 - `YOCO_WEBHOOK_SECRET` — `whsec_…` signing secret from `scripts/register-yoco-webhook.mjs`; used to verify webhook signatures.
 - `YOCO_CURRENCY` — ISO currency (default `ZAR`).
-- `APP_BASE_URL` — public base for Yoco success/cancel/failure browser redirects (default `http://localhost:3000`).
+- `APP_BASE_URL` — fallback base for Yoco success/cancel/failure browser redirects (default `http://localhost:3000`); normally the redirect base is derived from the request's `X-Forwarded-Host`/`Host` so it matches wherever the customer is browsing (localhost or tunnel).
 - `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM_EMAIL` — booking-notification email (587 = STARTTLS, 465 = implicit TLS). If unset, emails are skipped.
 
 ## Notes

@@ -18,6 +18,25 @@ const APP_BASE_URL =
   process.env.APP_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:3000";
 
 /**
+ * Origin the customer's browser is actually on (localhost vs the ngrok
+ * tunnel), so Yoco's success/cancel/failure redirects land back on the same
+ * host the booking was made from. Behind a tunnel/proxy the original scheme
+ * and host arrive in X-Forwarded-*; otherwise fall back to the Host header,
+ * and finally to APP_BASE_URL.
+ */
+function requestOrigin(request: Request): string {
+  const host =
+    request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  if (!host) return APP_BASE_URL;
+  const proto =
+    request.headers.get("x-forwarded-proto") ??
+    (host.startsWith("localhost") || host.startsWith("127.0.0.1")
+      ? "http"
+      : "https");
+  return `${proto}://${host}`;
+}
+
+/**
  * Start a paid booking (Yoco hosted Checkout). Sequence:
  *   1. reserve the slot as a `pending` booking (409 if taken — before checkout)
  *   2. create a Yoco checkout with our success/cancel/failure URLs + bookingId
@@ -88,13 +107,15 @@ export async function POST(request: Request) {
     throw err;
   }
 
-  // 2. Create the hosted checkout.
+  // 2. Create the hosted checkout. Redirects go back to wherever the customer
+  //    is browsing from (localhost or the public tunnel), not a fixed host.
+  const baseUrl = requestOrigin(request);
   try {
     const checkout = await createCheckout({
       amountInCents: service.price_cents * guests,
-      successUrl: `${APP_BASE_URL}/booking/success?booking=${bookingId}`,
-      cancelUrl: `${APP_BASE_URL}/booking/cancelled?booking=${bookingId}`,
-      failureUrl: `${APP_BASE_URL}/booking/failed?booking=${bookingId}`,
+      successUrl: `${baseUrl}/booking/success?booking=${bookingId}`,
+      cancelUrl: `${baseUrl}/booking/cancelled?booking=${bookingId}`,
+      failureUrl: `${baseUrl}/booking/failed?booking=${bookingId}`,
       metadata: {
         bookingId: String(bookingId),
         businessId: String(business.id),
