@@ -24,12 +24,12 @@ export async function setServiceCapacity(
   serviceId: number,
   capacity: number
 ): Promise<ServiceRow | null> {
-  const { rows } = await query<{ id: number }>(
-    `UPDATE services SET capacity = $2, updated_at = now()
-      WHERE id = $1 RETURNING id`,
+  const { rowCount } = await query(
+    `UPDATE services SET capacity = $2, updated_at = NOW(3)
+      WHERE id = $1`,
     [serviceId, capacity]
   );
-  return rows[0] ? getService(serviceId) : null;
+  return rowCount > 0 ? getService(serviceId) : null;
 }
 
 export interface ListServicesOpts {
@@ -99,8 +99,9 @@ export async function setSlotHold(
   await query(
     `INSERT INTO slot_overrides (service_id, slot_start, held_seats)
        VALUES ($1, $2, $3)
-     ON CONFLICT (service_id, slot_start)
-       DO UPDATE SET held_seats = EXCLUDED.held_seats, updated_at = now()`,
+     ON DUPLICATE KEY UPDATE
+       held_seats = VALUES(held_seats),
+       updated_at = NOW(3)`,
     [serviceId, slotStart.toISOString(), heldSeats]
   );
 }
@@ -122,14 +123,14 @@ export async function bookedGuestsForSlot(
   end: Date,
   excludeBookingId?: number
 ): Promise<number> {
-  const { rows } = await query<{ seats: number }>(
-    `SELECT COALESCE(SUM(guests), 0)::int AS seats FROM bookings
+  const { rows } = await query<{ seats: number | string }>(
+    `SELECT COALESCE(SUM(guests), 0) AS seats FROM bookings
       WHERE service_id = $1 AND status <> 'cancelled'
         AND start_time < $3 AND end_time > $2
-        AND ($4::int IS NULL OR id <> $4)`,
+        AND ($4 IS NULL OR id <> $4)`,
     [serviceId, start.toISOString(), end.toISOString(), excludeBookingId ?? null]
   );
-  return rows[0].seats;
+  return Number(rows[0]?.seats ?? 0);
 }
 
 export async function findOrCreateCustomer(input: {
@@ -138,15 +139,17 @@ export async function findOrCreateCustomer(input: {
   email: string;
   phone?: string | null;
 }): Promise<number> {
-  const { rows } = await query<{ id: number }>(
+  await query(
     `INSERT INTO customers (business_id, name, email, phone)
        VALUES ($1, $2, $3, $4)
-     ON CONFLICT (business_id, email)
-       -- Keep the first-seen name; the per-booking snapshot holds the name
-       -- each booking was actually made with. Only fill a missing phone.
-       DO UPDATE SET phone = COALESCE(customers.phone, EXCLUDED.phone)
-     RETURNING id`,
+     ON DUPLICATE KEY UPDATE
+       phone = COALESCE(customers.phone, VALUES(phone))`,
     [input.businessId, input.name, input.email.toLowerCase(), input.phone ?? null]
+  );
+
+  const { rows } = await query<{ id: number }>(
+    `SELECT id FROM customers WHERE business_id = $1 AND email = $2 LIMIT 1`,
+    [input.businessId, input.email.toLowerCase()]
   );
   return rows[0].id;
 }
@@ -215,7 +218,7 @@ export async function setBookingSeen(
   seen: boolean
 ): Promise<BookingRow | null> {
   await query(
-    `UPDATE bookings SET seen = $2, updated_at = now() WHERE id = $1`,
+    `UPDATE bookings SET seen = $2, updated_at = NOW(3) WHERE id = $1`,
     [bookingId, seen]
   );
   return getBooking(bookingId);
@@ -227,7 +230,7 @@ export async function markAllBookingsSeen(
   seen: boolean
 ): Promise<void> {
   await query(
-    `UPDATE bookings SET seen = $2, updated_at = now()
+    `UPDATE bookings SET seen = $2, updated_at = NOW(3)
       WHERE business_id = $1 AND seen <> $2`,
     [businessId, seen]
   );
@@ -238,7 +241,7 @@ export async function setCheckoutId(
   checkoutId: string
 ): Promise<void> {
   await query(
-    `UPDATE bookings SET checkout_id = $2, updated_at = now() WHERE id = $1`,
+    `UPDATE bookings SET checkout_id = $2, updated_at = NOW(3) WHERE id = $1`,
     [bookingId, checkoutId]
   );
 }
@@ -263,7 +266,7 @@ export async function markBookingPaid(
   const { rowCount } = await query(
     `UPDATE bookings
         SET status = 'active', payment_status = 'paid', payment_id = $2,
-            payment_amount_cents = $3, updated_at = now()
+            payment_amount_cents = $3, updated_at = NOW(3)
       WHERE id = $1 AND payment_status <> 'paid'`,
     [bookingId, paymentId, amountCents]
   );
@@ -274,7 +277,7 @@ export async function markBookingPaid(
 // Never touches a paid booking.
 export async function releaseUnpaidBooking(bookingId: number): Promise<boolean> {
   const { rowCount } = await query(
-    `UPDATE bookings SET status = 'cancelled', updated_at = now()
+    `UPDATE bookings SET status = 'cancelled', updated_at = NOW(3)
       WHERE id = $1 AND payment_status <> 'paid' AND status <> 'cancelled'`,
     [bookingId]
   );
@@ -282,13 +285,12 @@ export async function releaseUnpaidBooking(bookingId: number): Promise<boolean> 
 }
 
 export async function cancelBooking(bookingId: number): Promise<BookingRow | null> {
-  const { rows } = await query<{ id: number }>(
-    `UPDATE bookings SET status = 'cancelled', updated_at = now()
-      WHERE id = $1 AND status <> 'cancelled' RETURNING id`,
+  const { rowCount } = await query(
+    `UPDATE bookings SET status = 'cancelled', updated_at = NOW(3)
+      WHERE id = $1 AND status <> 'cancelled'`,
     [bookingId]
   );
-  if (!rows[0]) {
-    // Either not found, or already cancelled — return current state if it exists.
+  if (rowCount === 0) {
     return getBooking(bookingId);
   }
   return getBooking(bookingId);

@@ -9,15 +9,15 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.99.2",
     "framer-motion": "^12.38.0",
+    "mysql2": "^3.24.2",
     "next": "16.1.7",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^9.0.5",
     "pg": "^8.22.0",
     "react": "19.2.3",
     "react-datepicker": "^9.1.0",
     "react-dom": "19.2.3",
-    "swr": "^2.4.2"
+    "swr": "^2.5.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

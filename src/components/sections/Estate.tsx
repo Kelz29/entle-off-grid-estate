@@ -48,21 +48,21 @@ export function Estate() {
             meets celebration.
           </h2>
           <p className="mt-6 text-sm leading-relaxed text-eoe-espresso/80 md:text-base">
-            Entle Off-Grid Estate is a Black-owned, privately held space for slow
-            mornings, golden-hour gatherings, and evenings that taper into
+            Entle Off Grid Estate is a Black owned, privately held space for
+            slow mornings, golden hour gatherings, and evenings that taper into
             stories around the table. Powered by the sun and surrounded by open
-            sky, the estate is intentionally intimate—designed for small
+            sky, the estate is intentionally intimate, designed for small
             weddings, private dinners, creative retreats, and curated community
             moments.
           </p>
           <p className="mt-4 text-sm leading-relaxed text-eoe-espresso/80 md:text-base">
-            Fifteen minutes from the city and a world away from it, every room,
-            pathway, and tablescape is considered—from the minimalist café to the
-            lawn that folds into the horizon. EOE is less a venue and more a
-            feeling: quietly expensive, deeply warm, and entirely off-grid.
+            Every room, pathway, and tablescape is considered. From the
+            minimalist cafe to the lawn that folds into the horizon, EOE is less
+            a venue and more a feeling: quietly expensive, deeply warm, and
+            entirely off grid.
           </p>
           <p className="mt-8 text-xs uppercase tracking-[0.24em] text-eoe-espresso/70">
-            Private estate • Off-grid café • Curated events
+            Private estate • Off grid cafe • Curated events
           </p>
         </motion.div>
       </div>

@@ -14,9 +14,9 @@ const cormorant = Cormorant_Garamond({
 });
 
 export const metadata: Metadata = {
-  title: "Entle Off-Grid Estate",
+  title: "Entle Off Grid Estate",
   description:
-    "A refined off-grid cafe, event venue, and private estate in South Africa.",
+    "A refined off grid cafe, event venue, and private estate in South Africa.",
 };
 
 export default function RootLayout({

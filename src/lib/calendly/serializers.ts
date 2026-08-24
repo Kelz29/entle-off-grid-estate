@@ -12,7 +12,7 @@ export function serializeEventType(service: ServiceRow, business: BusinessRow) {
   return {
     uri: eventTypeUri(service.id),
     name: service.name,
-    active: service.is_active && service.is_available_online,
+    active: Boolean(service.is_active && service.is_available_online),
     slug: service.slug,
     scheduling_url: schedulingUrl(business.id, service.id),
     duration: service.duration_minutes,
@@ -25,7 +25,7 @@ export function serializeEventType(service: ServiceRow, business: BusinessRow) {
     // Non-Calendly extras this site relies on (deposit, venue, capacity).
     price_cents: service.price_cents,
     location: business.address ?? null,
-    exclusive: service.exclusive,
+    exclusive: Boolean(service.exclusive),
     capacity: service.capacity,
     created_at: iso(service.created_at, business.timezone),
     updated_at: iso(service.updated_at, business.timezone),

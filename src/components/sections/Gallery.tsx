@@ -23,8 +23,8 @@ export function Gallery() {
             </h2>
           </div>
           <p className="hidden max-w-sm text-sm leading-relaxed text-eoe-ivory/80 md:block">
-            A living archive of the estate—sunrise mist, tables set for
-            celebration, and the quiet in between.
+            A living archive of the estate: sunrise mist, tables set for celebration, and the
+            quiet in between.
           </p>
         </div>
 
@@ -47,13 +47,9 @@ export function Gallery() {
                 src={photo.src}
                 alt={photo.alt}
                 fill
-                sizes="(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw"
+                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                 className="object-cover transition-transform duration-[2200ms] group-hover:scale-105"
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-eoe-ink/70 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-              <p className="absolute bottom-3 left-3 right-3 translate-y-2 text-[10px] uppercase tracking-[0.2em] text-eoe-ivory/90 opacity-0 transition-all group-hover:translate-y-0 group-hover:opacity-100">
-                {photo.caption}
-              </p>
             </motion.button>
           ))}
         </div>

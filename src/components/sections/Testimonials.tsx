@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 const testimonials = [
   {
     quote:
-      "It felt like hosting our wedding inside a magazine spread—effortless, intimate, and deeply us.",
+      "It felt like hosting our wedding inside a magazine spread: effortless, intimate, and deeply us.",
     name: "Lebo & Sandile",
     event: "Intimate wedding",
   },

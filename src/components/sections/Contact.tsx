@@ -59,7 +59,7 @@ export function Contact() {
                 Hours
               </p>
               <p className="mt-1 text-eoe-ivory">
-                Mon–Sun · 8:00–16:30
+                Mon to Sun · 8:00 to 16:30
               </p>
             </div>
           </div>
@@ -86,7 +86,7 @@ export function Contact() {
         </motion.div>
 
         <div className="mt-10 flex flex-col items-start justify-between gap-4 border-t border-eoe-ivory/15 pt-6 text-[11px] text-eoe-ivory/60 md:flex-row md:items-center">
-          <p>© {new Date().getFullYear()} Entle Off-Grid Estate. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} Entle Off Grid Estate. All rights reserved.</p>
           <p>Site crafted for quiet, editorial luxury.</p>
         </div>
       </div>

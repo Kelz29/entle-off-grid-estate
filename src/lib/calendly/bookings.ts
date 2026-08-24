@@ -1,5 +1,4 @@
-import type { PoolClient } from "pg";
-import { query, withTransaction } from "@/lib/db";
+import { query, withTransaction, type DbClient } from "@/lib/db";
 import type { BusinessRow, ServiceRow, BookingRow } from "./types";
 import { findOrCreateCustomer, getBooking } from "./repository";
 
@@ -18,16 +17,11 @@ export class ServiceNotBookableError extends Error {
 }
 
 /**
- * Create + confirm a booking (CALENDLY_API.md §2.6). end_time is derived from
- * the service duration. Two concurrency models depending on the service:
+ * Create + confirm a booking. end_time is derived from the service duration.
  *
- *  - exclusive (events): the Postgres exclusion constraint
- *    `bookings_service_no_overlap` guarantees one booking per slot; a violation
- *    surfaces as a 409.
- *  - shared (café): up to `service.capacity` guests may share a slot. Enforced
- *    in a transaction under a per-(service, slot) advisory lock — count the
- *    guests already booked for the slot and reject if this party would exceed
- *    capacity. The constraint doesn't cover these rows (is_exclusive = false).
+ *  - exclusive (events): reject overlapping live bookings for the same service
+ *  - shared (café): up to `service.capacity` guests may share a slot, enforced
+ *    under a MySQL named lock for the (service, slot) pair
  */
 export async function createScheduledEvent(input: {
   business: BusinessRow;
@@ -36,7 +30,7 @@ export async function createScheduledEvent(input: {
   invitee: { name: string; email: string; phone?: string | null };
   guests?: number;
   notes?: string | null;
-  status?: "active" | "pending"; // "pending" holds the slot during payment
+  status?: "active" | "pending";
 }): Promise<BookingRow> {
   const { business, service, startTime, invitee } = input;
 
@@ -89,11 +83,10 @@ type InsertArgs = {
   status: "active" | "pending";
 };
 
-// Column list + values shared by both insert paths (exclusive/shared differ
-// only by is_exclusive). Guest details are snapshotted onto the booking.
 const INSERT_COLS = `(business_id, service_id, customer_id, start_time, end_time,
   status, guests, notes, payment_provider, payment_status,
   guest_name, guest_email, guest_phone, is_exclusive)`;
+
 function insertValues(a: InsertArgs, exclusive: boolean): unknown[] {
   return [
     a.business.id,
@@ -107,60 +100,58 @@ function insertValues(a: InsertArgs, exclusive: boolean): unknown[] {
     a.invitee.name,
     a.invitee.email,
     a.invitee.phone ?? null,
-    exclusive,
+    exclusive ? 1 : 0,
   ];
 }
+
 const INSERT_PLACEHOLDERS =
   "($1, $2, $3, $4, $5, $6, $7, $8, 'yoco', 'unpaid', $9, $10, $11, $12)";
 
 async function insertExclusive(a: InsertArgs): Promise<number> {
-  try {
-    const { rows } = await query<{ id: number }>(
-      `INSERT INTO bookings ${INSERT_COLS} VALUES ${INSERT_PLACEHOLDERS} RETURNING id`,
+  return withTransaction(async (client) => {
+    await acquireSlotLock(client, a.service.id, a.startTime);
+
+    const overlapping = await countOverlapping(
+      client,
+      a.service.id,
+      a.startTime,
+      a.endTime
+    );
+    if (overlapping > 0) throw new SlotUnavailableError();
+
+    const result = await client.query(
+      `INSERT INTO bookings ${INSERT_COLS} VALUES ${INSERT_PLACEHOLDERS}`,
       insertValues(a, true)
     );
-    return rows[0].id;
-  } catch (err) {
-    if (isPgCode(err, "23P01")) throw new SlotUnavailableError(); // overlap
-    throw err;
-  }
-}
-
-async function insertShared(a: InsertArgs): Promise<number> {
-  // All café seatings for a slot share the same start_time (steps are
-  // duration+buffer apart, so they never overlap across different starts) —
-  // lock on (service, slot-start) to serialise concurrent bookings, then count.
-  const slotEpoch = Math.floor(a.startTime.getTime() / 1000);
-  return withTransaction(async (client) => {
-    await client.query("SELECT pg_advisory_xact_lock($1, $2)", [
-      a.service.id,
-      slotEpoch,
-    ]);
-
-    const held = await slotHeld(client, a.service.id, a.startTime);
-    const { rows: used } = await client.query<{ seats: number }>(
-      `SELECT COALESCE(SUM(guests), 0)::int AS seats FROM bookings
-        WHERE service_id = $1 AND status <> 'cancelled'
-          AND start_time < $3 AND end_time > $2`,
-      [a.service.id, a.startTime.toISOString(), a.endTime.toISOString()]
-    );
-    if (used[0].seats + held + a.guests > a.service.capacity) {
-      throw new SlotUnavailableError();
-    }
-
-    const { rows } = await client.query<{ id: number }>(
-      `INSERT INTO bookings ${INSERT_COLS} VALUES ${INSERT_PLACEHOLDERS} RETURNING id`,
-      insertValues(a, false)
-    );
-    return rows[0].id;
+    if (!result.insertId) throw new Error("Insert did not return an id");
+    return result.insertId;
   });
 }
 
-/**
- * Move a booking to a new start time (admin reschedule). Re-checks the target
- * slot with the same capacity rules as creation, excluding this booking itself,
- * and frees the old slot's seats by virtue of the row moving.
- */
+async function insertShared(a: InsertArgs): Promise<number> {
+  return withTransaction(async (client) => {
+    await acquireSlotLock(client, a.service.id, a.startTime);
+
+    const held = await slotHeld(client, a.service.id, a.startTime);
+    const used = await countOverlappingGuests(
+      client,
+      a.service.id,
+      a.startTime,
+      a.endTime
+    );
+    if (used + held + a.guests > a.service.capacity) {
+      throw new SlotUnavailableError();
+    }
+
+    const result = await client.query(
+      `INSERT INTO bookings ${INSERT_COLS} VALUES ${INSERT_PLACEHOLDERS}`,
+      insertValues(a, false)
+    );
+    if (!result.insertId) throw new Error("Insert did not return an id");
+    return result.insertId;
+  });
+}
+
 export async function rescheduleBooking(input: {
   booking: BookingRow;
   service: ServiceRow;
@@ -170,35 +161,38 @@ export async function rescheduleBooking(input: {
   const newEnd = new Date(newStart.getTime() + service.duration_minutes * 60_000);
 
   if (service.exclusive) {
-    try {
-      await query(
-        `UPDATE bookings SET start_time = $2, end_time = $3, updated_at = now()
+    await withTransaction(async (client) => {
+      await acquireSlotLock(client, service.id, newStart);
+      const overlapping = await countOverlapping(
+        client,
+        service.id,
+        newStart,
+        newEnd,
+        booking.id
+      );
+      if (overlapping > 0) throw new SlotUnavailableError();
+      await client.query(
+        `UPDATE bookings SET start_time = $2, end_time = $3, updated_at = NOW(3)
           WHERE id = $1`,
         [booking.id, newStart.toISOString(), newEnd.toISOString()]
       );
-    } catch (err) {
-      if (isPgCode(err, "23P01")) throw new SlotUnavailableError();
-      throw err;
-    }
+    });
   } else {
-    const slotEpoch = Math.floor(newStart.getTime() / 1000);
     await withTransaction(async (client) => {
-      await client.query("SELECT pg_advisory_xact_lock($1, $2)", [
-        service.id,
-        slotEpoch,
-      ]);
+      await acquireSlotLock(client, service.id, newStart);
       const held = await slotHeld(client, service.id, newStart);
-      const { rows } = await client.query<{ seats: number }>(
-        `SELECT COALESCE(SUM(guests), 0)::int AS seats FROM bookings
-          WHERE service_id = $1 AND status <> 'cancelled' AND id <> $4
-            AND start_time < $3 AND end_time > $2`,
-        [service.id, newStart.toISOString(), newEnd.toISOString(), booking.id]
+      const used = await countOverlappingGuests(
+        client,
+        service.id,
+        newStart,
+        newEnd,
+        booking.id
       );
-      if (rows[0].seats + held + booking.guests > service.capacity) {
+      if (used + held + booking.guests > service.capacity) {
         throw new SlotUnavailableError();
       }
       await client.query(
-        `UPDATE bookings SET start_time = $2, end_time = $3, updated_at = now()
+        `UPDATE bookings SET start_time = $2, end_time = $3, updated_at = NOW(3)
           WHERE id = $1`,
         [booking.id, newStart.toISOString(), newEnd.toISOString()]
       );
@@ -210,11 +204,6 @@ export async function rescheduleBooking(input: {
   return updated;
 }
 
-/**
- * Admin: change a booking's guest count. For shared services this re-checks the
- * slot's effective capacity (per-slot override, else service default) excluding
- * this booking; exclusive bookings just update.
- */
 export async function updateBookingGuests(input: {
   booking: BookingRow;
   service: ServiceRow;
@@ -226,27 +215,28 @@ export async function updateBookingGuests(input: {
   const end = new Date(booking.end_time);
 
   if (service.exclusive) {
-    await query(`UPDATE bookings SET guests = $2, updated_at = now() WHERE id = $1`, [
-      booking.id,
-      guests,
-    ]);
+    await query(
+      `UPDATE bookings SET guests = $2, updated_at = NOW(3) WHERE id = $1`,
+      [booking.id, guests]
+    );
   } else {
-    const slotEpoch = Math.floor(start.getTime() / 1000);
     await withTransaction(async (client) => {
-      await client.query("SELECT pg_advisory_xact_lock($1, $2)", [service.id, slotEpoch]);
+      await acquireSlotLock(client, service.id, start);
       const held = await slotHeld(client, service.id, start);
-      const { rows } = await client.query<{ seats: number }>(
-        `SELECT COALESCE(SUM(guests), 0)::int AS seats FROM bookings
-          WHERE service_id = $1 AND status <> 'cancelled' AND id <> $4
-            AND start_time < $3 AND end_time > $2`,
-        [service.id, start.toISOString(), end.toISOString(), booking.id]
+      const used = await countOverlappingGuests(
+        client,
+        service.id,
+        start,
+        end,
+        booking.id
       );
-      if (rows[0].seats + held + guests > service.capacity)
+      if (used + held + guests > service.capacity) {
         throw new SlotUnavailableError();
-      await client.query(`UPDATE bookings SET guests = $2, updated_at = now() WHERE id = $1`, [
-        booking.id,
-        guests,
-      ]);
+      }
+      await client.query(
+        `UPDATE bookings SET guests = $2, updated_at = NOW(3) WHERE id = $1`,
+        [booking.id, guests]
+      );
     });
   }
 
@@ -255,9 +245,24 @@ export async function updateBookingGuests(input: {
   return updated;
 }
 
-// Manually-held (blocked) seats for a slot, read on a transaction client.
+async function acquireSlotLock(
+  client: DbClient,
+  serviceId: number,
+  slotStart: Date
+): Promise<void> {
+  const slotEpoch = Math.floor(slotStart.getTime() / 1000);
+  const lockName = `eoe:slot:${serviceId}:${slotEpoch}`;
+  const { rows } = await client.query<{ locked: number | string }>(
+    `SELECT GET_LOCK($1, 10) AS locked`,
+    [lockName]
+  );
+  if (Number(rows[0]?.locked) !== 1) {
+    throw new SlotUnavailableError();
+  }
+}
+
 async function slotHeld(
-  client: PoolClient,
+  client: DbClient,
   serviceId: number,
   slotStart: Date
 ): Promise<number> {
@@ -268,11 +273,36 @@ async function slotHeld(
   return rows[0]?.held_seats ?? 0;
 }
 
-function isPgCode(err: unknown, code: string): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "code" in err &&
-    (err as { code?: string }).code === code
+async function countOverlapping(
+  client: DbClient,
+  serviceId: number,
+  start: Date,
+  end: Date,
+  excludeBookingId?: number
+): Promise<number> {
+  const { rows } = await client.query<{ cnt: number | string }>(
+    `SELECT COUNT(*) AS cnt FROM bookings
+      WHERE service_id = $1 AND status <> 'cancelled'
+        AND start_time < $3 AND end_time > $2
+        AND ($4 IS NULL OR id <> $4)`,
+    [serviceId, start.toISOString(), end.toISOString(), excludeBookingId ?? null]
   );
+  return Number(rows[0]?.cnt ?? 0);
+}
+
+async function countOverlappingGuests(
+  client: DbClient,
+  serviceId: number,
+  start: Date,
+  end: Date,
+  excludeBookingId?: number
+): Promise<number> {
+  const { rows } = await client.query<{ seats: number | string }>(
+    `SELECT COALESCE(SUM(guests), 0) AS seats FROM bookings
+      WHERE service_id = $1 AND status <> 'cancelled'
+        AND start_time < $3 AND end_time > $2
+        AND ($4 IS NULL OR id <> $4)`,
+    [serviceId, start.toISOString(), end.toISOString(), excludeBookingId ?? null]
+  );
+  return Number(rows[0]?.seats ?? 0);
 }

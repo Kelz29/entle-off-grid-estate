@@ -41,7 +41,7 @@ export function SiteHeader() {
         } transition-colors`}
       >
         <Link href="/" className="font-display text-base font-semibold">
-          Entle Off-Grid Estate
+          Entle Off Grid Estate
         </Link>
         <nav className="hidden gap-6 md:flex">
           {navItems.map((item) => (

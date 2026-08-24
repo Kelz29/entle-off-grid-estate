@@ -31,7 +31,7 @@ export function Hero() {
           transition={{ duration: 0.9, ease: "easeOut" }}
           className="mb-4 text-xs tracking-[0.35em] text-eoe-ivory/85"
         >
-          OFF-GRID ESTATE • 15 MIN FROM THE CITY
+          OFF GRID ESTATE • SOUTH AFRICA
         </motion.p>
 
         <motion.h1
@@ -54,7 +54,7 @@ export function Hero() {
           className="mt-6 max-w-xl text-sm text-eoe-ivory/85 md:text-base"
         >
           <p>
-            A private estate, off-grid café, and considered venue for gatherings
+            A private estate, off grid cafe, and considered venue for gatherings
             that feel both intimate and quietly cinematic.
           </p>
         </motion.div>
@@ -85,7 +85,7 @@ export function Hero() {
           transition={{ duration: 1, ease: "easeOut", delay: 0.6 }}
           className="mt-16 flex items-center justify-between text-[11px] text-eoe-ivory/70"
         >
-          <p>Mon–Sun 8:00–16:30 • 067 366 2302</p>
+          <p>Mon to Sun 8:00 to 16:30 • 067 366 2302</p>
           <div className="flex items-center gap-2">
             <span className="hidden md:inline">Scroll</span>
             <span className="h-px w-10 bg-eoe-ivory/40" />

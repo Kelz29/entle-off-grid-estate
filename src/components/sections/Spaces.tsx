@@ -21,8 +21,8 @@ export function Spaces() {
             </h2>
           </div>
           <p className="hidden max-w-sm text-sm leading-relaxed text-eoe-espresso/80 md:block">
-            Choose from our café, venue, or open garden. Each space can be
-            tailored with our in-house styling partners and preferred suppliers.
+            Choose from our cafe, venue hall, or open garden. Each space can be
+            tailored with our in house styling partners and preferred suppliers.
           </p>
         </div>
 

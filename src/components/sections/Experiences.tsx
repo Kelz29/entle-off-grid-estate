@@ -27,8 +27,9 @@ export function Experiences() {
             </h2>
           </div>
           <p className="max-w-sm text-sm leading-relaxed text-eoe-ivory/80">
-            From wine pairings and milestone birthdays to year-end functions and
-            themed celebrations—tap a reel to watch the estate come alive.
+            From brunch series and chef&apos;s tables to pop ups and creative
+            residencies, the estate is a canvas for experiences that feel
+            deeply personal.
           </p>
         </div>
       </div>
