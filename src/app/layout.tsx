@@ -47,7 +47,13 @@ export const metadata: Metadata = {
     images: ["/outdoor/eoe.jpg"],
   },
   icons: {
-    icon: "/outdoor/eoe.jpg",
+    icon: [
+      { url: "/favicon.png", sizes: "48x48", type: "image/png" },
+      { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    shortcut: "/favicon.png",
   },
   other: {
     "theme-color": "#ffffff",
