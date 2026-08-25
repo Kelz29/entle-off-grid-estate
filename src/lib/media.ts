@@ -12,7 +12,7 @@ export const hero = {
 export const estatePhoto: Photo = {
   src: "/outdoor/catching-the-sunset.jpg",
   caption: "Catching the sunset",
-  alt: "Guests catching the sunset at Entle Off-Grid Estate",
+  alt: "Guests catching the sunset at Entle Off Grid Estate",
 };
 
 export const spaces: (Photo & { title: string; capacity: string; blurb: string })[] = [
@@ -22,20 +22,20 @@ export const spaces: (Photo & { title: string; capacity: string; blurb: string }
     blurb: "Timeless interiors, open views and a carefully selected wine list.",
     src: "/indoor/timeless-design.jpg",
     caption: "Timeless design & selected wines",
-    alt: "Café interior with open views at Entle Off-Grid Estate",
+    alt: "Café interior with open views at Entle Off Grid Estate",
   },
   {
     title: "The Venue",
     capacity: "Up to 80 seated · 120 cocktail",
-    blurb: "A warm, candle-lit space for celebrations that run into the evening.",
+    blurb: "A warm, candle lit space for celebrations that run into the evening.",
     src: "/outdoor/cozy-winter.jpg",
     caption: "Cozy winter evenings",
-    alt: "Cozy candle-lit winter evening at the estate",
+    alt: "Cozy candle lit winter evening at the estate",
   },
   {
     title: "The Garden",
     capacity: "Flexible lawn layouts",
-    blurb: "Open lawns and big skies that fold into golden-hour ceremonies.",
+    blurb: "Open lawns and big skies that fold into golden hour ceremonies.",
     src: "/outdoor/lovely-evening.jpg",
     caption: "A lovely evening outdoors",
     alt: "Outdoor lawn at golden hour",
@@ -45,7 +45,7 @@ export const spaces: (Photo & { title: string; capacity: string; blurb: string }
 export const foodPhoto: Photo = {
   src: "/food/one-table.jpg",
   caption: "One table. Endless flavours.",
-  alt: "A shared table laid with food at Entle Off-Grid Estate",
+  alt: "A shared table laid with food at Entle Off Grid Estate",
 };
 
 export const reels: Reel[] = [
@@ -64,7 +64,7 @@ export const reels: Reel[] = [
   {
     src: "/video/year-end-function.mp4",
     poster: "/outdoor/cozy-winter.jpg",
-    title: "Year-end functions",
+    title: "Year end functions",
     blurb: "Send the year off in style.",
   },
   {
@@ -88,7 +88,7 @@ export const reels: Reel[] = [
 ];
 
 export const gallery: Photo[] = [
-  { src: "/outdoor/eoe.jpg", caption: "Entle Off-Grid Estate", alt: "The estate" },
+  { src: "/outdoor/eoe.jpg", caption: "Entle Off Grid Estate", alt: "The estate" },
   {
     src: "/indoor/sunsets.jpg",
     caption: "Sunsets from inside",

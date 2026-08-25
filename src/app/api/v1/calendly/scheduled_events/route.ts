@@ -8,16 +8,29 @@ import {
   createScheduledEvent,
   SlotUnavailableError,
   ServiceNotBookableError,
+  InvalidCarsError,
 } from "@/lib/calendly/bookings";
 import {
   serializeScheduledEvent,
   collection,
 } from "@/lib/calendly/serializers";
 import { serviceIdFromEventType, BadEventTypeError } from "@/lib/calendly/config";
+import { isCarWashService, normalizeCarTypes } from "@/lib/calendly/car-wash";
 import { parseIsoAssumeUtc } from "@/lib/calendly/time";
+import { isAdminAuthorized } from "@/lib/admin-auth";
+import {
+  isValidEmail,
+  isValidPhone,
+  normalizeEmail,
+} from "@/lib/contact-validation";
 
 // GET /api/v1/calendly/scheduled_events?business_id=1&status=active
+// Admin session only — full PII list.
 export async function GET(request: Request) {
+  if (!(await isAdminAuthorized(request))) {
+    return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+  }
+
   const url = new URL(request.url);
   const businessId = Number(url.searchParams.get("business_id"));
   if (!Number.isInteger(businessId)) {
@@ -51,8 +64,12 @@ export async function GET(request: Request) {
   );
 }
 
-// POST /api/v1/calendly/scheduled_events — create + confirm a booking (§2.6).
+// POST /api/v1/calendly/scheduled_events — admin New booking modal only.
 export async function POST(request: Request) {
+  if (!(await isAdminAuthorized(request))) {
+    return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -84,6 +101,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ detail: "Business not found" }, { status: 404 });
   }
 
+  let carTypes: string[] | null = null;
+  try {
+    if (parsed.carTypes && parsed.carTypes.length > 0) {
+      carTypes = normalizeCarTypes(service.slug, parsed.carTypes);
+    } else if (isCarWashService(service.slug)) {
+      carTypes = null; // table only — wash can be added later by admin
+    } else {
+      carTypes = normalizeCarTypes(service.slug, parsed.carTypes);
+    }
+  } catch (err) {
+    return NextResponse.json(
+      { detail: err instanceof Error ? err.message : "Invalid car_types" },
+      { status: 422 }
+    );
+  }
+
   try {
     const booking = await createScheduledEvent({
       business,
@@ -91,7 +124,9 @@ export async function POST(request: Request) {
       startTime: parsed.startTime,
       invitee: parsed.invitee,
       guests: parsed.guests,
+      carTypes,
       notes: parsed.notes,
+      specialRequest: parsed.specialRequest,
     });
     return NextResponse.json(
       { resource: serializeScheduledEvent(booking, business) },
@@ -101,7 +136,7 @@ export async function POST(request: Request) {
     if (err instanceof SlotUnavailableError) {
       return NextResponse.json({ detail: err.message }, { status: 409 });
     }
-    if (err instanceof ServiceNotBookableError) {
+    if (err instanceof ServiceNotBookableError || err instanceof InvalidCarsError) {
       return NextResponse.json({ detail: err.message }, { status: 400 });
     }
     throw err;
@@ -113,7 +148,9 @@ type CreateBody = {
   startTime: Date;
   invitee: { name: string; email: string; phone?: string | null };
   guests?: number;
+  carTypes?: string[] | null;
   notes?: string | null;
+  specialRequest?: string | null;
 };
 
 function validateCreateBody(body: unknown): CreateBody | { error: string } {
@@ -137,18 +174,23 @@ function validateCreateBody(body: unknown): CreateBody | { error: string } {
   }
   const name = typeof invitee.name === "string" ? invitee.name.trim() : "";
   if (name.length < 1 || name.length > 201) {
-    return { error: "invitee.name must be 1–201 characters" };
+    return { error: "invitee.name must be 1 to 201 characters" };
   }
-  const email = typeof invitee.email === "string" ? invitee.email.trim() : "";
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+  const emailRaw = typeof invitee.email === "string" ? invitee.email : "";
+  // Admin walk-ins may use @noemail.local placeholders.
+  const emailOk =
+    isValidEmail(emailRaw) ||
+    /^[^@\s]+@noemail\.local$/i.test(emailRaw.trim());
+  if (!emailOk) {
     return { error: "invitee.email must be a valid email" };
   }
+  const email = normalizeEmail(emailRaw);
   let phone: string | null = null;
-  if (invitee.phone != null) {
-    if (typeof invitee.phone !== "string" || invitee.phone.length > 20) {
-      return { error: "invitee.phone must be ≤ 20 characters" };
+  if (invitee.phone != null && String(invitee.phone).trim()) {
+    if (typeof invitee.phone !== "string" || !isValidPhone(invitee.phone)) {
+      return { error: "invitee.phone must be a valid phone number" };
     }
-    phone = invitee.phone;
+    phone = invitee.phone.trim();
   }
 
   // Fold questions_and_answers into notes as "question: answer" lines (§2.6).
@@ -167,17 +209,27 @@ function validateCreateBody(body: unknown): CreateBody | { error: string } {
   }
   const notes = noteLines.length ? noteLines.join("\n") : null;
 
+  const specialRequest =
+    typeof b.special_request === "string" && b.special_request.trim()
+      ? b.special_request.trim().slice(0, 500)
+      : null;
+
   const guests =
     typeof b.guests === "number" && Number.isFinite(b.guests)
       ? Math.max(1, Math.trunc(b.guests))
       : undefined;
+  const carTypes = Array.isArray(b.car_types)
+    ? b.car_types.filter((x): x is string => typeof x === "string")
+    : undefined;
 
   return {
     eventType: b.event_type,
     startTime,
     invitee: { name, email, phone },
     guests,
+    carTypes,
     notes,
+    specialRequest,
   };
 }
 
@@ -190,5 +242,5 @@ function parseOptionalDate(raw: string | null): Date | undefined {
 function clampCount(raw: string | null, def = 20): number {
   const n = Number(raw);
   if (!raw || !Number.isFinite(n)) return def;
-  return Math.min(100, Math.max(1, Math.trunc(n)));
+  return Math.min(500, Math.max(1, Math.trunc(n)));
 }

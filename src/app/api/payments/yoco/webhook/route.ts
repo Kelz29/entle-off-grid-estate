@@ -6,6 +6,7 @@ import {
   getBooking,
   getActiveBusiness,
 } from "@/lib/calendly/repository";
+import { parseBookingId } from "@/lib/calendly/booking-id";
 import { sendBookingConfirmation } from "@/lib/email";
 
 /**
@@ -34,6 +35,7 @@ export async function POST(request: Request) {
       amount?: number;
       status?: string;
       metadata?: Record<string, string>;
+      checkoutId?: string;
     };
   };
   try {
@@ -47,13 +49,16 @@ export async function POST(request: Request) {
     const meta = p.metadata ?? {};
 
     // Prefer the bookingId we stamped on the checkout; fall back to checkoutId.
-    let bookingId = Number(meta.bookingId);
-    if (!Number.isInteger(bookingId) && meta.checkoutId) {
-      const b = await getBookingByCheckoutId(meta.checkoutId);
-      if (b) bookingId = b.id;
+    let bookingId = parseBookingId(meta.bookingId);
+    if (!bookingId) {
+      const checkoutKey = meta.checkoutId ?? p.checkoutId;
+      if (checkoutKey) {
+        const b = await getBookingByCheckoutId(checkoutKey);
+        if (b) bookingId = b.id;
+      }
     }
 
-    if (Number.isInteger(bookingId)) {
+    if (bookingId) {
       const paymentId = p.id ?? "";
       const amount = typeof p.amount === "number" ? p.amount : 0;
       const newlyPaid = await markBookingPaid(bookingId, paymentId, amount);

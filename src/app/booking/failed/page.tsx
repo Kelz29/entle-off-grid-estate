@@ -1,10 +1,15 @@
-import { ReleaseNotice } from "@/components/booking/ReleaseNotice";
+import { redirect } from "next/navigation";
 
-export default function BookingFailedPage() {
-  return (
-    <ReleaseNotice
-      title="Payment didn't go through"
-      message="Your payment could not be completed, so nothing was charged and the time slot has been released. Please try again — a different card usually does the trick."
-    />
-  );
+/** Legacy `?booking=&token=` → path-based failure URL. */
+export default async function LegacyFailedPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ booking?: string; token?: string }>;
+}) {
+  const { booking, token } = await searchParams;
+  if (booking) {
+    const qs = token ? `?token=${encodeURIComponent(token)}` : "";
+    redirect(`/booking/failed/${encodeURIComponent(booking)}${qs}`);
+  }
+  redirect("/");
 }

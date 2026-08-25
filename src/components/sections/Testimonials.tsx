@@ -17,7 +17,7 @@ const testimonials = [
   },
   {
     quote:
-      "There&apos;s a stillness to the estate that makes conversations slower, deeper, and more honest.",
+      "There's a stillness to the estate that makes conversations slower, deeper, and more honest.",
     name: "Thandeka",
     event: "Creative retreat",
   },
@@ -29,7 +29,7 @@ export function Testimonials() {
       <div className="mx-auto max-w-6xl">
         <div className="mb-8 flex items-baseline justify-between gap-4">
           <div>
-            <p className="text-xs tracking-[0.3em] text-eoe-ivory/70">
+            <p className="text-xs tracking-[0.3em] text-eoe-ivory/90">
               TESTIMONIALS
             </p>
             <h2 className="mt-3 font-display text-3xl tracking-[0.18em] md:text-4xl">
@@ -53,7 +53,7 @@ export function Testimonials() {
               <blockquote className="font-display text-xl leading-relaxed tracking-[0.12em] text-eoe-ivory/90 md:text-2xl">
                 “{t.quote}”
               </blockquote>
-              <figcaption className="mt-6 text-xs uppercase tracking-[0.22em] text-eoe-ivory/70">
+              <figcaption className="mt-6 text-xs uppercase tracking-[0.22em] text-eoe-ivory/90">
                 {t.name} • {t.event}
               </figcaption>
             </motion.figure>

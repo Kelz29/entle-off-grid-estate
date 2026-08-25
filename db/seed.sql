@@ -45,10 +45,10 @@ VALUES
   (1, 'Cafe Table Reservation', 'cafe-table-reservation',
    'Reserve a table at The Cafe for a relaxed off-grid meal.',
    120, 15, 10000, '#9A6552', 2, 60, true, true, false, 50),
-  -- Estate Tour / events: exclusive — one booking per slot.
-  (1, 'Estate Tour', 'estate-tour',
-   'A guided walk through the gardens, venue and private estate.',
-   60, 15, 10000, '#CDA98E', 4, 90, true, true, true, 1)
+  -- Café + car wash: same shared seating; cars field on booking (max 4).
+  (1, 'Cafe Table Reservation + Car Wash', 'cafe-table-car-wash',
+   'Reserve a table at The Cafe and add a car wash. Deposit is R100 per guest plus the wash minimum for each car by type (up to 4 cars).',
+   120, 15, 10000, '#CDA98E', 2, 60, true, true, false, 50)
 ON CONFLICT (business_id, slug) DO UPDATE
   SET name = EXCLUDED.name,
       description = EXCLUDED.description,
@@ -63,3 +63,8 @@ ON CONFLICT (business_id, slug) DO UPDATE
       exclusive = EXCLUDED.exclusive,
       capacity = EXCLUDED.capacity,
       updated_at = now();
+
+-- Retire the old Estate Tour offering if it still exists.
+UPDATE services
+   SET is_active = false, is_available_online = false, updated_at = now()
+ WHERE business_id = 1 AND slug = 'estate-tour';

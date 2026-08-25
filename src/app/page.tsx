@@ -13,9 +13,15 @@ import { CustomCursor } from "@/components/ui/CustomCursor";
 export default function Home() {
   return (
     <div className="bg-eoe-ivory text-eoe-ink">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded-full focus:bg-eoe-espresso focus:px-4 focus:py-2 focus:text-sm focus:text-eoe-ivory"
+      >
+        Skip to content
+      </a>
       <CustomCursor />
       <SiteHeader />
-      <main className="relative">
+      <main id="main-content" className="relative">
         <Hero />
         <Estate />
         <Spaces />
@@ -24,8 +30,8 @@ export default function Home() {
         <Booking />
         <Gallery />
         <Testimonials />
-        <Contact />
       </main>
+      <Contact />
     </div>
   );
 }

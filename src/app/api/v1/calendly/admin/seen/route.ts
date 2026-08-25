@@ -1,16 +1,11 @@
 import { NextResponse } from "next/server";
 import { markAllBookingsSeen } from "@/lib/calendly/repository";
+import { isAdminAuthorized } from "@/lib/admin-auth";
 
 // PATCH /api/v1/calendly/admin/seen  { business_id?, seen }
 // Admin-gated: mark every booking for the business seen (or unseen).
 export async function PATCH(request: Request) {
-  const expected = process.env.ADMIN_TOKEN;
-  const url = new URL(request.url);
-  const token =
-    url.searchParams.get("token") ??
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
-    "";
-  if (!expected || token !== expected) {
+  if (!(await isAdminAuthorized(request))) {
     return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
   }
 

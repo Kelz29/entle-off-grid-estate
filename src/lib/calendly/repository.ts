@@ -197,7 +197,7 @@ export async function listBookings(
   return rows;
 }
 
-export async function getBooking(bookingId: number): Promise<BookingRow | null> {
+export async function getBooking(bookingId: string): Promise<BookingRow | null> {
   const { rows } = await query<BookingRow>(
     `SELECT b.*, s.name AS service_name,
             COALESCE(b.guest_name,  c.name)  AS customer_name,
@@ -214,7 +214,7 @@ export async function getBooking(bookingId: number): Promise<BookingRow | null> 
 
 // Mark a single booking notification seen / unseen.
 export async function setBookingSeen(
-  bookingId: number,
+  bookingId: string,
   seen: boolean
 ): Promise<BookingRow | null> {
   await query(
@@ -237,7 +237,7 @@ export async function markAllBookingsSeen(
 }
 
 export async function setCheckoutId(
-  bookingId: number,
+  bookingId: string,
   checkoutId: string
 ): Promise<void> {
   await query(
@@ -249,7 +249,7 @@ export async function setCheckoutId(
 export async function getBookingByCheckoutId(
   checkoutId: string
 ): Promise<BookingRow | null> {
-  const { rows } = await query<{ id: number }>(
+  const { rows } = await query<{ id: string }>(
     `SELECT id FROM bookings WHERE checkout_id = $1 LIMIT 1`,
     [checkoutId]
   );
@@ -259,7 +259,7 @@ export async function getBookingByCheckoutId(
 // Mark a (usually pending) booking as paid and activate it. Idempotent: a
 // repeated webhook for an already-paid booking is a no-op.
 export async function markBookingPaid(
-  bookingId: number,
+  bookingId: string,
   paymentId: string,
   amountCents: number
 ): Promise<boolean> {
@@ -273,18 +273,33 @@ export async function markBookingPaid(
   return rowCount > 0;
 }
 
-// Release a slot held by an unpaid booking (abandoned/cancelled checkout).
-// Never touches a paid booking.
-export async function releaseUnpaidBooking(bookingId: number): Promise<boolean> {
+// Release a pending unpaid checkout hold. Never touches paid / active / partial.
+export async function releaseUnpaidBooking(bookingId: string): Promise<boolean> {
   const { rowCount } = await query(
     `UPDATE bookings SET status = 'cancelled', updated_at = NOW(3)
-      WHERE id = $1 AND payment_status <> 'paid' AND status <> 'cancelled'`,
+      WHERE id = $1
+        AND status = 'pending'
+        AND payment_status = 'unpaid'`,
     [bookingId]
   );
   return rowCount > 0;
 }
 
-export async function cancelBooking(bookingId: number): Promise<BookingRow | null> {
+/** Mark a partially_paid booking as fully settled (balance paid at venue). */
+export async function markBookingSettled(
+  bookingId: string
+): Promise<BookingRow | null> {
+  const { rowCount } = await query(
+    `UPDATE bookings
+        SET payment_status = 'paid', updated_at = NOW(3)
+      WHERE id = $1 AND payment_status = 'partially_paid'`,
+    [bookingId]
+  );
+  if (rowCount === 0) return getBooking(bookingId);
+  return getBooking(bookingId);
+}
+
+export async function cancelBooking(bookingId: string): Promise<BookingRow | null> {
   const { rowCount } = await query(
     `UPDATE bookings SET status = 'cancelled', updated_at = NOW(3)
       WHERE id = $1 AND status <> 'cancelled'`,
@@ -294,4 +309,38 @@ export async function cancelBooking(bookingId: number): Promise<BookingRow | nul
     return getBooking(bookingId);
   }
   return getBooking(bookingId);
+}
+
+export type ClientContact = {
+  id: number;
+  name: string;
+  email: string;
+  phone: string | null;
+  booking_count: number;
+  last_visit: string | null;
+  created_at: string;
+};
+
+/** Guests with a real email who have booked (excludes @noemail.local placeholders). */
+export async function listClients(
+  businessId: number
+): Promise<ClientContact[]> {
+  const { rows } = await query<ClientContact>(
+    `SELECT c.id,
+            c.name,
+            c.email,
+            c.phone,
+            c.created_at,
+            (SELECT COUNT(*) FROM bookings b WHERE b.customer_id = c.id) AS booking_count,
+            (SELECT MAX(b.start_time) FROM bookings b WHERE b.customer_id = c.id) AS last_visit
+       FROM customers c
+      WHERE c.business_id = $1
+        AND c.email NOT LIKE '%@noemail.local'
+      ORDER BY (last_visit IS NULL), last_visit DESC, c.name ASC`,
+    [businessId]
+  );
+  return rows.map((r) => ({
+    ...r,
+    booking_count: Number(r.booking_count ?? 0),
+  }));
 }

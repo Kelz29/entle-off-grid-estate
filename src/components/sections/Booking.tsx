@@ -1,11 +1,43 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, cloneElement, isValidElement } from "react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { AnimatePresence, motion } from "framer-motion";
+import {
+  CAR_TYPES,
+  carWashMinimumCents,
+  isCarWashService,
+  MAX_CARS_PER_SESSION,
+  type CarTypeId,
+} from "@/lib/calendly/car-wash";
+import {
+  bookingDepositCents,
+  PLATFORM_FEE_CENTS,
+} from "@/lib/calendly/pricing";
+import {
+  emailError,
+  normalizeEmail,
+  phoneError,
+} from "@/lib/contact-validation";
 
 const BUSINESS_ID = process.env.NEXT_PUBLIC_BUSINESS_ID ?? "1";
+const DEFAULT_CAR_TYPE: CarTypeId = "sedan";
+
+function money(cents: number) {
+  if (!cents) return "Free";
+  return `R${(cents / 100).toLocaleString("en-ZA")}`;
+}
+
+function resizeCarTypes(prev: CarTypeId[], count: number): CarTypeId[] {
+  const n = Math.min(MAX_CARS_PER_SESSION, Math.max(1, count));
+  if (prev.length === n) return prev;
+  if (prev.length > n) return prev.slice(0, n);
+  return [
+    ...prev,
+    ...Array.from({ length: n - prev.length }, () => DEFAULT_CAR_TYPE),
+  ];
+}
 
 type EventType = {
   uri: string;
@@ -21,17 +53,12 @@ type EventType = {
 };
 
 type AvailableTime = {
-  start_time: string; // zoned ISO, e.g. "2026-07-04T08:00:00+02:00"
+  start_time: string;
   scheduling_url: string;
-  invitees_remaining: number; // seats left (shared) or 1 (exclusive)
+  invitees_remaining: number;
 };
 
 type Step = "service" | "slot" | "details";
-
-function money(cents: number) {
-  if (!cents) return "Free";
-  return `R${(cents / 100).toLocaleString("en-ZA")}`;
-}
 
 // The venue only takes bookings Fri–Sun; grey out Mon–Thu in the calendar.
 // getDay(): Sun=0 … Sat=6 → open on Fri(5), Sat(6), Sun(0).
@@ -61,7 +88,12 @@ export function Booking() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [guests, setGuests] = useState("2");
-  const [notes, setNotes] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<{
+    email?: string;
+    phone?: string;
+  }>({});
+  const [carTypes, setCarTypes] = useState<CarTypeId[]>([DEFAULT_CAR_TYPE]);
+  const [specialRequest, setSpecialRequest] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,12 +101,31 @@ export function Booking() {
     remaining: number;
     requested: number;
   } | null>(null);
-  // Non-refundable-deposit notice shown before handing off to Yoco.
+  // Non-refundable deposit notice shown before handing off to Yoco.
   const [confirmPay, setConfirmPay] = useState(false);
 
-  // Deposit is per guest: total = price_cents × party size.
+  useEffect(() => {
+    if (!confirmPay && !seatWarn) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (confirmPay) setConfirmPay(false);
+      if (seatWarn) setSeatWarn(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmPay, seatWarn]);
+
   const guestCount = Math.max(1, Math.trunc(Number(guests)) || 1);
-  const depositTotal = service ? service.price_cents * guestCount : 0;
+  const needsCars = isCarWashService(service?.slug);
+  const washMinimum = needsCars ? carWashMinimumCents(carTypes) : 0;
+  const depositTotal = service
+    ? bookingDepositCents({
+        priceCents: service.price_cents,
+        guests: guestCount,
+        serviceSlug: service.slug,
+        carTypes: needsCars ? carTypes : null,
+      })
+    : 0;
 
   // Load event types.
   useEffect(() => {
@@ -127,6 +178,17 @@ export function Booking() {
     e.preventDefault();
     if (!service || !slot) return;
 
+    const nextErrors: { email?: string; phone?: string } = {};
+    const emailIssue = emailError(email);
+    if (emailIssue) nextErrors.email = emailIssue;
+    const phoneIssue = phoneError(phone);
+    if (phoneIssue) nextErrors.phone = phoneIssue;
+    setFieldErrors(nextErrors);
+    if (nextErrors.email || nextErrors.phone) {
+      setError("Please fix the highlighted fields.");
+      return;
+    }
+
     // Café slots are shared — don't let the party exceed the seats left.
     if (!service.exclusive && guestCount > slot.invitees_remaining) {
       setSeatWarn({
@@ -136,7 +198,11 @@ export function Booking() {
       return;
     }
 
-    // Warn that the deposit is non-refundable before redirecting to Yoco.
+    if (needsCars && (carTypes.length < 1 || carTypes.length > MAX_CARS_PER_SESSION)) {
+      setError(`Please choose between 1 and ${MAX_CARS_PER_SESSION} cars.`);
+      return;
+    }
+    setError(null);
     setConfirmPay(true);
   };
 
@@ -155,9 +221,14 @@ export function Booking() {
         body: JSON.stringify({
           event_type: service.uri,
           start_time: slot.start_time,
-          invitee: { name, email, phone: phone || undefined },
+          invitee: {
+            name,
+            email: normalizeEmail(email),
+            phone: phone.trim() || undefined,
+          },
           guests: guestCount,
-          notes: notes || undefined,
+          ...(needsCars ? { car_types: carTypes } : {}),
+          special_request: specialRequest.trim() || undefined,
         }),
       });
       if (res.status === 409) {
@@ -167,11 +238,19 @@ export function Booking() {
         setSubmitting(false);
         return;
       }
+      if (res.status === 429) {
+        setError("Too many attempts. Please wait a moment and try again.");
+        setSubmitting(false);
+        return;
+      }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail ?? "Unable to start payment.");
       }
       const { redirectUrl } = await res.json();
+      if (!redirectUrl || typeof redirectUrl !== "string") {
+        throw new Error("Unable to start payment.");
+      }
       window.location.href = redirectUrl; // → Yoco hosted checkout
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -199,20 +278,21 @@ export function Booking() {
     >
       <div className="mx-auto max-w-6xl">
         <div className="mb-10">
-          <p className="text-xs tracking-[0.3em] text-eoe-espresso/70">
+          <p className="text-xs tracking-[0.3em] text-eoe-espresso">
             ONLINE BOOKING
           </p>
           <h2 className="mt-3 font-display text-3xl tracking-[0.18em] text-eoe-espresso md:text-4xl">
             Pick a space, pick a time.
           </h2>
-          <p className="mt-4 max-w-md text-sm leading-relaxed text-eoe-espresso/80">
+          <p className="mt-4 max-w-md text-sm leading-relaxed text-eoe-ink/90">
             Choose an experience, select an available slot, and we&apos;ll hold
-            it for you — Calendly-style. Bookings run{" "}
+            it for you. Bookings run{" "}
             <span className="font-medium text-eoe-espresso">
-              Friday–Sunday, 11:00–18:00
+              Friday to Sunday, 11:00 to 18:00
             </span>
-            . A R100 per-guest deposit secures your slot and comes off your
-            bill on the day.
+            . A R100 per guest deposit secures your slot and comes off your
+            bill on the day, plus a R30 platform fee. Cafe with car wash adds
+            the wash minimum for each car by type.
           </p>
         </div>
 
@@ -226,42 +306,47 @@ export function Booking() {
           <div className="grid md:grid-cols-[300px_1fr]">
             {/* Left rail — selection summary (Calendly style) */}
             <aside className="border-b border-eoe-espresso/10 bg-eoe-espresso px-6 py-7 text-eoe-ivory md:border-b-0 md:border-r">
-              <p className="text-[11px] uppercase tracking-[0.26em] text-eoe-ivory/60">
-                Entle Off-Grid Estate
+              <p className="text-[11px] uppercase tracking-[0.26em] text-eoe-ivory/80">
+                Entle Off Grid Estate
               </p>
               <h3 className="mt-3 font-display text-2xl tracking-wide">
                 {service ? service.name : "Select an experience"}
               </h3>
               {service && (
                 <>
-                  <p className="mt-4 flex items-center gap-2 text-sm text-eoe-ivory/80">
+                  <p className="mt-4 flex items-center gap-2 text-sm text-eoe-ivory/95">
                     <span aria-hidden>🕑</span> {service.duration} min
                   </p>
-                  <p className="mt-1 flex items-start gap-2 text-sm text-eoe-ivory/80">
+                  <p className="mt-1 flex items-start gap-2 text-sm text-eoe-ivory/95">
                     <span aria-hidden>💳</span>
                     <span>
                       {money(service.price_cents)} deposit per guest
-                      <span className="block text-xs text-eoe-ivory/55">
-                        Non-refundable — goes towards your bill on arrival
+                      {needsCars && washMinimum > 0 && (
+                        <span className="block text-xs text-eoe-ivory/75">
+                          + {money(washMinimum)} car wash minimum
+                        </span>
+                      )}
+                      <span className="block text-xs text-eoe-ivory/75">
+                        Non refundable, comes off your bill on arrival.
                       </span>
                     </span>
                   </p>
                   {service.location && (
-                    <p className="mt-1 flex items-start gap-2 text-sm text-eoe-ivory/80">
+                    <p className="mt-1 flex items-start gap-2 text-sm text-eoe-ivory/95">
                       <span aria-hidden>📍</span> {service.location}
                     </p>
                   )}
                   {dateLabel && (
-                    <p className="mt-1 flex items-center gap-2 text-sm text-eoe-ivory/80">
+                    <p className="mt-1 flex items-center gap-2 text-sm text-eoe-ivory/95">
                       <span aria-hidden>📅</span> {dateLabel}
                     </p>
                   )}
                   {slot && (
-                    <p className="mt-1 flex items-center gap-2 text-sm text-eoe-ivory/80">
+                    <p className="mt-1 flex items-center gap-2 text-sm text-eoe-ivory/95">
                       <span aria-hidden>⏰</span> {wallTime(slot.start_time)}
                     </p>
                   )}
-                  <p className="mt-6 text-xs leading-relaxed text-eoe-ivory/60">
+                  <p className="mt-6 text-xs leading-relaxed text-eoe-ivory/80">
                     {service.description_plain}
                   </p>
                 </>
@@ -276,6 +361,8 @@ export function Booking() {
                   error={servicesError}
                   onPick={(s) => {
                     setService(s);
+                    setCarTypes([DEFAULT_CAR_TYPE]);
+                    setError(null);
                     setStep("slot");
                   }}
                 />
@@ -302,7 +389,7 @@ export function Booking() {
                   <button
                     type="button"
                     onClick={() => setStep("slot")}
-                    className="mb-5 text-xs uppercase tracking-[0.22em] text-eoe-espresso/60 hover:text-eoe-espresso"
+                    className="mb-5 text-xs uppercase tracking-[0.22em] text-eoe-espresso/80 hover:text-eoe-espresso"
                   >
                     ← Back
                   </button>
@@ -310,7 +397,7 @@ export function Booking() {
                     Your details
                   </h4>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                    <Field label="Full name" span2>
+                    <Field id="booking-name" label="Full name" span2>
                       <input
                         value={name}
                         onChange={(e) => setName(e.target.value)}
@@ -318,24 +405,70 @@ export function Booking() {
                         className={inputCls}
                       />
                     </Field>
-                    <Field label="Email">
+                    <Field
+                      id="booking-email"
+                      label="Email"
+                      error={fieldErrors.email}
+                    >
                       <input
                         type="email"
+                        inputMode="email"
+                        autoComplete="email"
                         value={email}
-                        onChange={(e) => setEmail(e.target.value)}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          if (fieldErrors.email) {
+                            setFieldErrors((prev) => ({
+                              ...prev,
+                              email: undefined,
+                            }));
+                          }
+                        }}
+                        onBlur={() => {
+                          const msg = emailError(email);
+                          setFieldErrors((prev) => ({
+                            ...prev,
+                            email: msg ?? undefined,
+                          }));
+                        }}
                         required
+                        aria-invalid={Boolean(fieldErrors.email)}
                         className={inputCls}
                       />
                     </Field>
-                    <Field label="Phone (optional)">
+                    <Field
+                      id="booking-phone"
+                      label="Phone (optional)"
+                      error={fieldErrors.phone}
+                    >
                       <input
+                        type="tel"
+                        inputMode="tel"
+                        autoComplete="tel"
                         value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
+                        onChange={(e) => {
+                          setPhone(e.target.value);
+                          if (fieldErrors.phone) {
+                            setFieldErrors((prev) => ({
+                              ...prev,
+                              phone: undefined,
+                            }));
+                          }
+                        }}
+                        onBlur={() => {
+                          const msg = phoneError(phone);
+                          setFieldErrors((prev) => ({
+                            ...prev,
+                            phone: msg ?? undefined,
+                          }));
+                        }}
                         maxLength={20}
+                        placeholder="e.g. 067 366 2302"
+                        aria-invalid={Boolean(fieldErrors.phone)}
                         className={inputCls}
                       />
                     </Field>
-                    <Field label="Guests">
+                    <Field id="booking-guests" label="Guests">
                       <input
                         type="number"
                         min={1}
@@ -344,12 +477,60 @@ export function Booking() {
                         className={inputCls}
                       />
                     </Field>
-                    <Field label="Notes (optional)" span2>
+                    {needsCars && (
+                      <>
+                        <Field
+                          id="booking-cars"
+                          label={`Cars to wash (max ${MAX_CARS_PER_SESSION})`}
+                        >
+                          <input
+                            type="number"
+                            min={1}
+                            max={MAX_CARS_PER_SESSION}
+                            value={carTypes.length}
+                            onChange={(e) => {
+                              const n = Math.trunc(Number(e.target.value)) || 1;
+                              setCarTypes((prev) => resizeCarTypes(prev, n));
+                            }}
+                            required
+                            className={inputCls}
+                          />
+                        </Field>
+                        {carTypes.map((typeId, i) => (
+                          <Field
+                            key={i}
+                            id={`booking-car-type-${i}`}
+                            label={`Car ${i + 1} type`}
+                            span2={carTypes.length === 1}
+                          >
+                            <select
+                              value={typeId}
+                              onChange={(e) => {
+                                const next = e.target.value as CarTypeId;
+                                setCarTypes((prev) =>
+                                  prev.map((t, idx) => (idx === i ? next : t))
+                                );
+                              }}
+                              className={inputCls}
+                              required
+                            >
+                              {CAR_TYPES.map((t) => (
+                                <option key={t.id} value={t.id}>
+                                  {t.label} (from {money(t.min_cents)})
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                        ))}
+                      </>
+                    )}
+                    <Field id="booking-special" label="Special request (optional)" span2>
                       <textarea
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
+                        value={specialRequest}
+                        onChange={(e) => setSpecialRequest(e.target.value)}
                         rows={3}
-                        placeholder="Anything we should know?"
+                        maxLength={500}
+                        placeholder="Anniversary, birthday, proposal, flowers, dietary needs…"
                         className={`${inputCls} rounded-2xl`}
                       />
                     </Field>
@@ -364,16 +545,22 @@ export function Booking() {
                       ? "Redirecting to Yoco…"
                       : `Pay ${money(depositTotal)} deposit & confirm`}
                   </button>
-                  <p className="mt-3 text-[11px] text-eoe-espresso/50">
-                    Your {money(depositTotal)} deposit (
+                  <p className="mt-3 text-[11px] text-eoe-espresso/70">
+                    Your {money(depositTotal)} total (
                     {money(service.price_cents)} × {guestCount}{" "}
-                    {guestCount === 1 ? "guest" : "guests"}) secures the
-                    booking and is deducted from your bill when you arrive.
-                    You&apos;ll be taken to Yoco&apos;s secure checkout — test
+                    {guestCount === 1 ? "guest" : "guests"}
+                    {needsCars && washMinimum > 0
+                      ? ` + ${money(washMinimum)} car wash minimum`
+                      : ""}
+                    {` + ${money(PLATFORM_FEE_CENTS)} platform fee`}
+                    ). The deposit portion comes off your bill on arrival.
+                    You&apos;ll be taken to Yoco&apos;s secure checkout. Test
                     card 4111 1111 1111 1111, any future expiry &amp; CVV.
                   </p>
                   {error && (
-                    <p className="mt-3 text-[12px] text-rose-600">{error}</p>
+                    <p className="mt-3 text-[12px] text-rose-600" role="alert" aria-live="polite">
+                      {error}
+                    </p>
                   )}
                 </form>
               )}
@@ -386,6 +573,9 @@ export function Booking() {
       <AnimatePresence>
         {confirmPay && service && (
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-pay-title"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -400,31 +590,37 @@ export function Booking() {
               onClick={(e) => e.stopPropagation()}
               className="w-full max-w-sm rounded-3xl border border-eoe-espresso/10 bg-white p-7 text-center shadow-2xl"
             >
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-2xl">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-2xl" aria-hidden>
                 💳
               </div>
-              <h4 className="mt-4 font-display text-2xl tracking-wide text-eoe-espresso">
+              <h4
+                id="confirm-pay-title"
+                className="mt-4 font-display text-2xl tracking-wide text-eoe-espresso"
+              >
                 Before you pay
               </h4>
-              <p className="mt-2 text-sm leading-relaxed text-eoe-espresso/75">
+              <p className="mt-2 text-sm leading-relaxed text-eoe-ink/85">
                 Your{" "}
                 <span className="font-semibold text-eoe-espresso">
                   {money(depositTotal)}
                 </span>{" "}
-                deposit ({money(service.price_cents)} × {guestCount}{" "}
-                {guestCount === 1 ? "guest" : "guests"}) is{" "}
+                total ({money(service.price_cents)} × {guestCount}{" "}
+                {guestCount === 1 ? "guest" : "guests"}
+                {needsCars && washMinimum > 0
+                  ? ` + ${money(washMinimum)} car wash`
+                  : ""}
+                {` + ${money(PLATFORM_FEE_CENTS)} platform fee`}) includes a{" "}
                 <span className="font-semibold text-eoe-espresso">
-                  non-refundable
-                </span>
-                . It secures your booking and is deducted from your bill when
-                you arrive.
+                  non refundable
+                </span>{" "}
+                deposit that comes off your bill on arrival.
               </p>
               <div className="mt-6 flex flex-col gap-2">
                 <button
                   onClick={startCheckout}
                   className="rounded-full bg-eoe-espresso px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-ivory hover:bg-eoe-espresso/90"
                 >
-                  I understand — pay {money(depositTotal)}
+                  I understand. Pay {money(depositTotal)}
                 </button>
                 <button
                   onClick={() => setConfirmPay(false)}
@@ -441,6 +637,9 @@ export function Booking() {
       <AnimatePresence>
         {seatWarn && slot && (
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="seat-warn-title"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -455,13 +654,16 @@ export function Booking() {
               onClick={(e) => e.stopPropagation()}
               className="w-full max-w-sm rounded-3xl border border-eoe-espresso/10 bg-white p-7 text-center shadow-2xl"
             >
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-2xl">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-2xl" aria-hidden>
                 ☕
               </div>
-              <h4 className="mt-4 font-display text-2xl tracking-wide text-eoe-espresso">
+              <h4
+                id="seat-warn-title"
+                className="mt-4 font-display text-2xl tracking-wide text-eoe-espresso"
+              >
                 Almost full
               </h4>
-              <p className="mt-2 text-sm leading-relaxed text-eoe-espresso/75">
+              <p className="mt-2 text-sm leading-relaxed text-eoe-ink/85">
                 The {wallTime(slot.start_time)} sitting has only{" "}
                 <span className="font-semibold text-eoe-espresso">
                   {seatWarn.remaining} seat
@@ -503,20 +705,48 @@ const inputCls =
   "w-full rounded-full border border-eoe-espresso/20 bg-eoe-ivory/40 px-4 py-2.5 text-sm text-eoe-espresso outline-none focus:border-eoe-espresso/50";
 
 function Field({
+  id,
   label,
   children,
   span2,
+  error,
 }: {
+  id: string;
   label: string;
   children: React.ReactNode;
   span2?: boolean;
+  error?: string;
 }) {
+  const control = isValidElement(children)
+    ? cloneElement(
+        children as React.ReactElement<{
+          id?: string;
+          "aria-describedby"?: string;
+        }>,
+        {
+          id,
+          ...(error ? { "aria-describedby": `${id}-error` } : {}),
+        }
+      )
+    : children;
   return (
     <div className={span2 ? "sm:col-span-2" : undefined}>
-      <label className="mb-1 block text-xs uppercase tracking-[0.22em] text-eoe-espresso/70">
+      <label
+        htmlFor={id}
+        className="mb-1 block text-xs uppercase tracking-[0.22em] text-eoe-espresso"
+      >
         {label}
       </label>
-      {children}
+      {control}
+      {error && (
+        <p
+          id={`${id}-error`}
+          className="mt-1.5 text-[11px] text-rose-600"
+          role="alert"
+        >
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -552,8 +782,9 @@ function ServiceStep({
                 <span className="block text-sm font-medium text-eoe-espresso">
                   {s.name}
                 </span>
-                <span className="block text-xs text-eoe-espresso/60">
-                  {s.duration} min · {money(s.price_cents)} per guest
+                <span className="block text-xs text-eoe-espresso/80">
+                  {s.duration} min · {money(s.price_cents)} per guest {" "}
+                  {isCarWashService(s.slug) ? " + car wash" : ""}
                 </span>
               </span>
             </span>
@@ -563,7 +794,7 @@ function ServiceStep({
           </button>
         ))}
         {services.length === 0 && !error && (
-          <p className="text-sm text-eoe-espresso/60">Loading experiences…</p>
+          <p className="text-sm text-eoe-espresso/80">Loading experiences…</p>
         )}
       </div>
     </div>
@@ -594,7 +825,7 @@ function SlotStep({
       <button
         type="button"
         onClick={onBack}
-        className="mb-5 text-xs uppercase tracking-[0.22em] text-eoe-espresso/60 hover:text-eoe-espresso"
+        className="mb-5 text-xs uppercase tracking-[0.22em] text-eoe-espresso/80 hover:text-eoe-espresso"
       >
         ← Back
       </button>
@@ -609,14 +840,14 @@ function SlotStep({
           />
         </div>
         <div className="min-w-[160px]">
-          <p className="mb-3 text-xs uppercase tracking-[0.22em] text-eoe-espresso/70">
+          <p className="mb-3 text-xs uppercase tracking-[0.22em] text-eoe-espresso">
             {date ? "Available times" : "Select a date"}
           </p>
           {date && loading && (
-            <p className="text-sm text-eoe-espresso/60">Loading…</p>
+            <p className="text-sm text-eoe-espresso/80">Loading…</p>
           )}
           {date && !loading && slots.length === 0 && (
-            <p className="text-sm text-eoe-espresso/60">
+            <p className="text-sm text-eoe-espresso/80">
               No times available on this day.
             </p>
           )}

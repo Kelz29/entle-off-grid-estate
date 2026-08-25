@@ -4,10 +4,10 @@
   /* Clay + white palette. `espresso` and `gold` are unified to the clay brand
      colour; buttons that fill with it use white text (see components). */
   --eoe-ivory: #ffffff;
-  --eoe-espresso: #9a6552;
-  --eoe-gold: #9a6552;
+  --eoe-espresso: #7a4f3f;
+  --eoe-gold: #8a5a45;
   --eoe-sage: #b3c0ae;
-  --eoe-ink: #2a1a12;
+  --eoe-ink: #1a100c;
 }
 
 @theme inline {
@@ -32,6 +32,13 @@ body {
   min-height: 100vh;
   background: var(--eoe-ivory);
   color: var(--eoe-ink);
+  font-weight: 450;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-display {
+  font-weight: 500;
 }
 
 /* Booking calendar sizing + aesthetics */
@@ -75,4 +82,21 @@ body {
 .booking-calendar .react-datepicker__day--keyboard-selected {
   background-color: var(--eoe-espresso);
   color: var(--eoe-ivory);
+}
+
+/* Focus rings for keyboard users */
+:focus-visible {
+  outline: 2px solid var(--eoe-espresso);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

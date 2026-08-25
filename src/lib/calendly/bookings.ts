@@ -1,6 +1,12 @@
-import { query, withTransaction, type DbClient } from "@/lib/db";
-import type { BusinessRow, ServiceRow, BookingRow } from "./types";
+import {
+  isCarWashService,
+  normalizeCarTypes,
+  carWashMinimumCents,
+} from "./car-wash";
+import { newBookingId } from "./booking-id";
+import type { BookingRow, BusinessRow, ServiceRow } from "./types";
 import { findOrCreateCustomer, getBooking } from "./repository";
+import { query, withTransaction, type DbClient } from "@/lib/db";
 
 export class SlotUnavailableError extends Error {
   constructor() {
@@ -13,6 +19,13 @@ export class ServiceNotBookableError extends Error {
   constructor() {
     super("Service is not available for online booking");
     this.name = "ServiceNotBookableError";
+  }
+}
+
+export class InvalidCarsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidCarsError";
   }
 }
 
@@ -29,7 +42,10 @@ export async function createScheduledEvent(input: {
   startTime: Date;
   invitee: { name: string; email: string; phone?: string | null };
   guests?: number;
+  cars?: number | null;
+  carTypes?: string[] | null;
   notes?: string | null;
+  specialRequest?: string | null;
   status?: "active" | "pending";
 }): Promise<BookingRow> {
   const { business, service, startTime, invitee } = input;
@@ -39,6 +55,31 @@ export async function createScheduledEvent(input: {
   }
 
   const guests = Math.max(1, input.guests ?? 1);
+  let cars: number | null = null;
+  let carTypes: string[] | null = null;
+  try {
+    const rawTypes =
+      input.carTypes ??
+      (typeof input.cars === "number" && input.cars > 0
+        ? Array.from({ length: input.cars }, () => "sedan")
+        : undefined);
+    // Empty / omitted car_types on car-wash = table only (admin phone bookings).
+    if (
+      rawTypes == null ||
+      (Array.isArray(rawTypes) && rawTypes.length === 0)
+    ) {
+      carTypes = null;
+      cars = null;
+    } else {
+      carTypes = normalizeCarTypes(service.slug, rawTypes);
+      cars = carTypes?.length ?? null;
+    }
+  } catch (err) {
+    throw new InvalidCarsError(
+      err instanceof Error ? err.message : "Invalid cars value"
+    );
+  }
+
   const endTime = new Date(
     startTime.getTime() + service.duration_minutes * 60_000
   );
@@ -52,6 +93,7 @@ export async function createScheduledEvent(input: {
   });
 
   const insertArgs = {
+    id: newBookingId(),
     business,
     service,
     customerId,
@@ -59,7 +101,10 @@ export async function createScheduledEvent(input: {
     startTime,
     endTime,
     guests,
+    cars,
+    carTypes,
     notes: input.notes ?? null,
+    specialRequest: input.specialRequest ?? null,
     status,
   };
   const id = service.exclusive
@@ -72,6 +117,7 @@ export async function createScheduledEvent(input: {
 }
 
 type InsertArgs = {
+  id: string;
   business: BusinessRow;
   service: ServiceRow;
   customerId: number;
@@ -79,16 +125,20 @@ type InsertArgs = {
   startTime: Date;
   endTime: Date;
   guests: number;
+  cars: number | null;
+  carTypes: string[] | null;
   notes: string | null;
+  specialRequest: string | null;
   status: "active" | "pending";
 };
 
-const INSERT_COLS = `(business_id, service_id, customer_id, start_time, end_time,
-  status, guests, notes, payment_provider, payment_status,
+const INSERT_COLS = `(id, business_id, service_id, customer_id, start_time, end_time,
+  status, guests, cars, car_types, notes, special_request, payment_provider, payment_status,
   guest_name, guest_email, guest_phone, is_exclusive)`;
 
 function insertValues(a: InsertArgs, exclusive: boolean): unknown[] {
   return [
+    a.id,
     a.business.id,
     a.service.id,
     a.customerId,
@@ -96,7 +146,10 @@ function insertValues(a: InsertArgs, exclusive: boolean): unknown[] {
     a.endTime.toISOString(),
     a.status,
     a.guests,
+    a.cars,
+    a.carTypes ? JSON.stringify(a.carTypes) : null,
     a.notes,
+    a.specialRequest,
     a.invitee.name,
     a.invitee.email,
     a.invitee.phone ?? null,
@@ -105,9 +158,9 @@ function insertValues(a: InsertArgs, exclusive: boolean): unknown[] {
 }
 
 const INSERT_PLACEHOLDERS =
-  "($1, $2, $3, $4, $5, $6, $7, $8, 'yoco', 'unpaid', $9, $10, $11, $12)";
+  "($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'yoco', 'unpaid', $13, $14, $15, $16)";
 
-async function insertExclusive(a: InsertArgs): Promise<number> {
+async function insertExclusive(a: InsertArgs): Promise<string> {
   return withTransaction(async (client) => {
     await acquireSlotLock(client, a.service.id, a.startTime);
 
@@ -119,16 +172,15 @@ async function insertExclusive(a: InsertArgs): Promise<number> {
     );
     if (overlapping > 0) throw new SlotUnavailableError();
 
-    const result = await client.query(
+    await client.query(
       `INSERT INTO bookings ${INSERT_COLS} VALUES ${INSERT_PLACEHOLDERS}`,
       insertValues(a, true)
     );
-    if (!result.insertId) throw new Error("Insert did not return an id");
-    return result.insertId;
+    return a.id;
   });
 }
 
-async function insertShared(a: InsertArgs): Promise<number> {
+async function insertShared(a: InsertArgs): Promise<string> {
   return withTransaction(async (client) => {
     await acquireSlotLock(client, a.service.id, a.startTime);
 
@@ -143,12 +195,11 @@ async function insertShared(a: InsertArgs): Promise<number> {
       throw new SlotUnavailableError();
     }
 
-    const result = await client.query(
+    await client.query(
       `INSERT INTO bookings ${INSERT_COLS} VALUES ${INSERT_PLACEHOLDERS}`,
       insertValues(a, false)
     );
-    if (!result.insertId) throw new Error("Insert did not return an id");
-    return result.insertId;
+    return a.id;
   });
 }
 
@@ -204,6 +255,39 @@ export async function rescheduleBooking(input: {
   return updated;
 }
 
+/** If online deposit was paid and party/cars grew, balance is due on arrival. */
+async function markPartialIfOwesMore(
+  booking: BookingRow,
+  nextGuests: number,
+  nextCarTypes: string[] | null
+): Promise<void> {
+  if (booking.payment_status !== "paid") return;
+  const prevCars = (() => {
+    let raw: unknown = booking.car_types;
+    if (typeof raw === "string") {
+      try {
+        raw = JSON.parse(raw);
+      } catch {
+        raw = null;
+      }
+    }
+    return Array.isArray(raw)
+      ? raw.filter((x): x is string => typeof x === "string")
+      : [];
+  })();
+  const nextCars = nextCarTypes ?? [];
+  const guestsUp = nextGuests > booking.guests;
+  const washUp = carWashMinimumCents(nextCars) > carWashMinimumCents(prevCars);
+  const carsUp = nextCars.length > prevCars.length;
+  if (!guestsUp && !washUp && !carsUp) return;
+  await query(
+    `UPDATE bookings
+        SET payment_status = 'partially_paid', updated_at = NOW(3)
+      WHERE id = $1 AND payment_status = 'paid'`,
+    [booking.id]
+  );
+}
+
 export async function updateBookingGuests(input: {
   booking: BookingRow;
   service: ServiceRow;
@@ -240,8 +324,65 @@ export async function updateBookingGuests(input: {
     });
   }
 
+  const prevTypes = (() => {
+    let raw: unknown = booking.car_types;
+    if (typeof raw === "string") {
+      try {
+        raw = JSON.parse(raw);
+      } catch {
+        raw = null;
+      }
+    }
+    return Array.isArray(raw)
+      ? raw.filter((x): x is string => typeof x === "string")
+      : null;
+  })();
+  await markPartialIfOwesMore(booking, guests, prevTypes);
+
   const updated = await getBooking(booking.id);
   if (!updated) throw new Error("Booking vanished after guest update");
+  return updated;
+}
+
+/**
+ * Admin: set or clear cars on a booking. Empty carTypes → no wash (null).
+ * Does not change payment_amount_cents. If the booking was paid and cars were
+ * added/upgraded, status becomes partially_paid (balance on arrival).
+ */
+export async function updateBookingCars(input: {
+  booking: BookingRow;
+  service: ServiceRow;
+  carTypes: string[] | null;
+}): Promise<BookingRow> {
+  const { booking, service } = input;
+  if (!isCarWashService(service.slug)) {
+    throw new InvalidCarsError("This experience does not include car wash");
+  }
+
+  let cars: number | null = null;
+  let carTypes: string[] | null = null;
+  if (input.carTypes && input.carTypes.length > 0) {
+    try {
+      carTypes = normalizeCarTypes(service.slug, input.carTypes);
+      cars = carTypes?.length ?? null;
+    } catch (err) {
+      throw new InvalidCarsError(
+        err instanceof Error ? err.message : "Invalid car_types"
+      );
+    }
+  }
+
+  await query(
+    `UPDATE bookings
+        SET cars = $2, car_types = $3, updated_at = NOW(3)
+      WHERE id = $1`,
+    [booking.id, cars, carTypes ? JSON.stringify(carTypes) : null]
+  );
+
+  await markPartialIfOwesMore(booking, booking.guests, carTypes);
+
+  const updated = await getBooking(booking.id);
+  if (!updated) throw new Error("Booking vanished after car update");
   return updated;
 }
 
@@ -278,7 +419,7 @@ async function countOverlapping(
   serviceId: number,
   start: Date,
   end: Date,
-  excludeBookingId?: number
+  excludeBookingId?: string
 ): Promise<number> {
   const { rows } = await client.query<{ cnt: number | string }>(
     `SELECT COUNT(*) AS cnt FROM bookings
@@ -295,7 +436,7 @@ async function countOverlappingGuests(
   serviceId: number,
   start: Date,
   end: Date,
-  excludeBookingId?: number
+  excludeBookingId?: string
 ): Promise<number> {
   const { rows } = await client.query<{ seats: number | string }>(
     `SELECT COALESCE(SUM(guests), 0) AS seats FROM bookings

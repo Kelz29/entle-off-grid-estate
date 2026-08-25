@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS customers (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS bookings (
-  id                   INT AUTO_INCREMENT PRIMARY KEY,
+  id                   CHAR(36)     NOT NULL PRIMARY KEY,
   business_id          INT          NOT NULL,
   service_id           INT          NOT NULL,
   customer_id          INT          NOT NULL,
@@ -60,12 +60,15 @@ CREATE TABLE IF NOT EXISTS bookings (
   end_time             DATETIME(3)  NOT NULL,
   status               VARCHAR(32)  NOT NULL DEFAULT 'active',
   guests               INT          NOT NULL DEFAULT 1,
+  cars                 INT          NULL,
+  car_types            JSON         NULL,
   is_exclusive         TINYINT(1)   NOT NULL DEFAULT 1,
   seen                 TINYINT(1)   NOT NULL DEFAULT 0,
   guest_name           VARCHAR(255) NULL,
   guest_email          VARCHAR(255) NULL,
   guest_phone          VARCHAR(64)  NULL,
   notes                TEXT         NULL,
+  special_request      TEXT         NULL,
   payment_provider     VARCHAR(32)  NOT NULL DEFAULT 'yoco',
   payment_status       VARCHAR(32)  NOT NULL DEFAULT 'unpaid',
   checkout_id          VARCHAR(128) NULL,
@@ -94,4 +97,30 @@ CREATE TABLE IF NOT EXISTS slot_overrides (
   UNIQUE KEY slot_overrides_service_start (service_id, slot_start),
   CONSTRAINT slot_overrides_service_fk
     FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Guest special request (occasion / prep). Safe to re-run.
+SET @eoe_sr := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'bookings'
+    AND COLUMN_NAME = 'special_request'
+);
+SET @eoe_sql := IF(@eoe_sr = 0,
+  'ALTER TABLE bookings ADD COLUMN special_request TEXT NULL AFTER notes',
+  'SELECT 1');
+PREPARE eoe_stmt FROM @eoe_sql;
+EXECUTE eoe_stmt;
+DEALLOCATE PREPARE eoe_stmt;
+
+CREATE TABLE IF NOT EXISTS admin_users (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  username      VARCHAR(64)  NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  display_name  VARCHAR(120) NOT NULL,
+  role          VARCHAR(32)  NOT NULL DEFAULT 'staff',
+  is_active     TINYINT(1)   NOT NULL DEFAULT 1,
+  created_at    DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at    DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY admin_users_username (username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

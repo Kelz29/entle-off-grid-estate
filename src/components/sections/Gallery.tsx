@@ -17,12 +17,12 @@ export function Gallery() {
       <div className="mx-auto max-w-6xl">
         <div className="mb-8 flex items-baseline justify-between gap-4">
           <div>
-            <p className="text-xs tracking-[0.3em] text-eoe-ivory/70">GALLERY</p>
+            <p className="text-xs tracking-[0.3em] text-eoe-ivory/90">GALLERY</p>
             <h2 className="mt-3 font-display text-3xl tracking-[0.18em] md:text-4xl">
               A wall of moments.
             </h2>
           </div>
-          <p className="hidden max-w-sm text-sm leading-relaxed text-eoe-ivory/80 md:block">
+          <p className="hidden max-w-sm text-sm leading-relaxed text-eoe-ivory/95 md:block">
             A living archive of the estate: sunrise mist, tables set for celebration, and the
             quiet in between.
           </p>

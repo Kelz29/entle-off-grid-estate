@@ -5,6 +5,8 @@ import {
   setServiceCapacity,
 } from "@/lib/calendly/repository";
 import { serializeEventType } from "@/lib/calendly/serializers";
+import { isAdminAuthorized, requireAdminSession } from "@/lib/admin-auth";
+import { canManageSeats } from "@/lib/admin-roles";
 
 // GET /api/v1/calendly/event_types/{serviceId}
 // Not business-scoped: any existing service id resolves (CALENDLY_API.md §2.2).
@@ -37,13 +39,11 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ serviceId: string }> }
 ) {
-  const expected = process.env.ADMIN_TOKEN;
-  const url = new URL(request.url);
-  const token =
-    url.searchParams.get("token") ??
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
-    "";
-  if (!expected || token !== expected) {
+  const session = await requireAdminSession(request);
+  const allowed = session
+    ? canManageSeats(session.role)
+    : await isAdminAuthorized(request);
+  if (!allowed) {
     return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
   }
 

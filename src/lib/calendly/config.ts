@@ -13,7 +13,7 @@ export function eventTypeUri(serviceId: number): string {
   return `${CALENDLY_BASE}/event_types/${serviceId}`;
 }
 
-export function scheduledEventUri(bookingId: number): string {
+export function scheduledEventUri(bookingId: string): string {
   return `${CALENDLY_BASE}/scheduled_events/${bookingId}`;
 }
 

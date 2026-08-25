@@ -1,5 +1,7 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import type { BookingRow, BusinessRow } from "./calendly/types";
+import { carTypeLabel } from "./calendly/car-wash";
+import { enqueueEmailDetached } from "./email-queue";
 
 // SMTP transporter from env (SMTP_HOST/PORT/USER/PASSWORD/FROM_EMAIL).
 // Cached on globalThis so dev hot-reloads don't open a new pool each time.
@@ -32,7 +34,7 @@ export function emailConfigured(): boolean {
 
 function fromAddress(): string {
   const email = process.env.SMTP_FROM_EMAIL ?? process.env.SMTP_USER ?? "";
-  return `Entle Off-Grid Estate <${email}>`;
+  return `Entle Off Grid Estate <${email}>`;
 }
 
 function money(cents?: number | null): string {
@@ -58,6 +60,14 @@ const PHONE = "067 366 2302";
 // Shared call-to-action for every notification.
 const CALL_CTA = `Anything you'd like to ask, reschedule, or cancel? Give us a call on <strong style="color:#2a1a12;">${PHONE}</strong> and we'll happily sort it out.`;
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function renderEmail(opts: {
   heading: string;
   intro: string;
@@ -68,8 +78,8 @@ function renderEmail(opts: {
     .map(
       ([k, v]) => `
       <tr>
-        <td style="padding:8px 0;color:#8a7a72;font-size:12px;text-transform:uppercase;letter-spacing:1px;width:120px;vertical-align:top;">${k}</td>
-        <td style="padding:8px 0;color:#2a1a12;font-size:15px;">${v}</td>
+        <td style="padding:8px 0;color:#8a7a72;font-size:12px;text-transform:uppercase;letter-spacing:1px;width:120px;vertical-align:top;">${escapeHtml(k)}</td>
+        <td style="padding:8px 0;color:#2a1a12;font-size:15px;">${escapeHtml(v)}</td>
       </tr>`
     )
     .join("");
@@ -78,8 +88,8 @@ function renderEmail(opts: {
       <tr><td align="center">
         <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 10px 40px rgba(42,26,18,0.08);">
           <tr><td style="background:${CLAY};padding:26px 32px;">
-            <p style="margin:0;color:#ffffff;font-size:12px;letter-spacing:3px;text-transform:uppercase;opacity:0.85;">Entle Off-Grid Estate</p>
-            <h1 style="margin:8px 0 0;color:#ffffff;font-size:24px;font-weight:600;">${opts.heading}</h1>
+            <p style="margin:0;color:#ffffff;font-size:12px;letter-spacing:3px;text-transform:uppercase;opacity:0.85;">Entle Off Grid Estate</p>
+            <h1 style="margin:8px 0 0;color:#ffffff;font-size:24px;font-weight:600;">${escapeHtml(opts.heading)}</h1>
           </td></tr>
           <tr><td style="padding:28px 32px;">
             <p style="margin:0 0 18px;color:#2a1a12;font-size:15px;line-height:1.6;">${opts.intro}</p>
@@ -93,7 +103,7 @@ function renderEmail(opts: {
             }
           </td></tr>
           <tr><td style="padding:18px 32px;border-top:1px solid #f0eae4;color:#9a8a82;font-size:12px;">
-            183 Lakeview, Bloemfontein · 067 366 2302 · Fri–Sun, 11:00–18:00
+            183 Lakeview, Bloemfontein · 067 366 2302 · Fri to Sun, 11:00 to 18:00
           </td></tr>
         </table>
       </td></tr>
@@ -112,7 +122,7 @@ function textFallback(
     .map(([k, v]) => `${k}: ${v}`)
     .join(
       "\n"
-    )}${outroText}\n\nEntle Off-Grid Estate · 183 Lakeview, Bloemfontein · ${PHONE}`;
+    )}${outroText}\n\nEntle Off Grid Estate · 183 Lakeview, Bloemfontein · ${PHONE}`;
 }
 
 async function send(to: string, subject: string, heading: string, intro: string, rows: [string, string][], outro?: string): Promise<void> {
@@ -120,18 +130,22 @@ async function send(to: string, subject: string, heading: string, intro: string,
   // @noemail.local = placeholder for manual (phone/walk-in) bookings made from
   // the admin dashboard without a real address — never try to mail it.
   if (!transport || !to || to.endsWith("@noemail.local")) return;
-  try {
-    await transport.sendMail({
-      from: fromAddress(),
-      to,
-      subject,
-      text: textFallback(heading, intro, rows, outro),
-      html: renderEmail({ heading, intro, rows, outro }),
-    });
-  } catch (err) {
-    // Best-effort — never let a mail failure break the booking flow.
-    console.error("[email] failed to send:", err instanceof Error ? err.message : err);
-  }
+  // Serial queue: 30s between each outbound message. Detached so booking
+  // webhooks / admin PATCH don't wait out the gap.
+  enqueueEmailDetached(async () => {
+    try {
+      await transport.sendMail({
+        from: fromAddress(),
+        to,
+        subject,
+        text: textFallback(heading, intro, rows, outro),
+        html: renderEmail({ heading, intro, rows, outro }),
+      });
+    } catch (err) {
+      // Best-effort — never let a mail failure break the booking flow.
+      console.error("[email] failed to send:", err instanceof Error ? err.message : err);
+    }
+  });
 }
 
 function baseRows(b: BookingRow, business: BusinessRow): [string, string][] {
@@ -140,41 +154,168 @@ function baseRows(b: BookingRow, business: BusinessRow): [string, string][] {
     ["When", whenLabel(b.start_time, business.timezone)],
     ["Guests", String(b.guests)],
   ];
+  if (b.cars != null && b.cars > 0) {
+    const labels = (() => {
+      let raw: unknown = b.car_types;
+      if (typeof raw === "string") {
+        try {
+          raw = JSON.parse(raw);
+        } catch {
+          raw = null;
+        }
+      }
+      if (!Array.isArray(raw)) return null;
+      return raw
+        .filter((x): x is string => typeof x === "string")
+        .map(carTypeLabel)
+        .join(", ");
+    })();
+    rows.push([
+      "Cars",
+      labels ? `${b.cars} (${labels})` : String(b.cars),
+    ]);
+  }
   if (business.address) rows.push(["Where", business.address]);
   return rows;
 }
 
 export async function sendBookingConfirmation(b: BookingRow, business: BusinessRow) {
   const rows = baseRows(b, business);
-  rows.push(["Deposit paid", money(b.payment_amount_cents)]);
+  rows.push(["Amount paid", money(b.payment_amount_cents)]);
+  const name = escapeHtml(b.customer_name ?? "there");
   await send(
     b.customer_email ?? "",
-    "Your booking is confirmed · Entle Off-Grid Estate",
+    "Your booking is confirmed · Entle Off Grid Estate",
     "You're booked in",
-    `Thank you, ${b.customer_name ?? "there"} — your payment went through and your booking is confirmed. Your deposit is deducted from your bill when you arrive.`,
+    `Thank you, ${name}. Your payment went through and your booking is confirmed. Your deposit is deducted from your bill when you arrive.`,
     rows,
     `We can't wait to host you. ${CALL_CTA}`
   );
 }
 
 export async function sendBookingRescheduled(b: BookingRow, business: BusinessRow) {
+  const name = escapeHtml(b.customer_name ?? "there");
   await send(
     b.customer_email ?? "",
-    "Your booking has been moved · Entle Off-Grid Estate",
+    "Your booking has been moved · Entle Off Grid Estate",
     "Your booking has moved",
-    `Hi ${b.customer_name ?? "there"}, your booking has been rescheduled. Here are the new details:`,
+    `Hi ${name}, your booking has been rescheduled. Here are the new details:`,
     baseRows(b, business),
     `Your deposit carries over to the new time. ${CALL_CTA}`
   );
 }
 
 export async function sendBookingCancelled(b: BookingRow, business: BusinessRow) {
+  const name = escapeHtml(b.customer_name ?? "there");
   await send(
     b.customer_email ?? "",
-    "Your booking has been cancelled · Entle Off-Grid Estate",
+    "Your booking has been cancelled · Entle Off Grid Estate",
     "Your booking is cancelled",
-    `Hi ${b.customer_name ?? "there"}, your booking below has been cancelled.`,
+    `Hi ${name}, your booking below has been cancelled.`,
     baseRows(b, business),
     `If you paid a deposit, our team will be in touch about it. ${CALL_CTA}`
   );
+}
+
+function bodyToHtml(body: string): string {
+  return escapeHtml(body)
+    .split(/\n{2,}/)
+    .map((p) => `<p style="margin:0 0 14px;color:#2a1a12;font-size:15px;line-height:1.6;">${p.replace(/\n/g, "<br/>")}</p>`)
+    .join("");
+}
+
+/**
+ * Build + queue a marketing email (shared 30s gap with booking mail).
+ * Returns false if skipped (no SMTP / placeholder / empty).
+ */
+function prepareMarketingMail(input: {
+  to: string;
+  name?: string | null;
+  subject: string;
+  body: string;
+}): {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+} | null {
+  const transport = getTransport();
+  const to = input.to.trim().toLowerCase();
+  if (!transport || !to || to.endsWith("@noemail.local")) return null;
+  if (!input.subject.trim() || !input.body.trim()) return null;
+
+  const greeting = input.name?.trim()
+    ? `Hi ${escapeHtml(input.name.trim())},`
+    : "Hi there,";
+  const html = `<!doctype html><html><body style="margin:0;background:#f4efe9;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4efe9;padding:24px 0;">
+      <tr><td align="center">
+        <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 10px 40px rgba(42,26,18,0.08);">
+          <tr><td style="background:${CLAY};padding:26px 32px;">
+            <p style="margin:0;color:#ffffff;font-size:12px;letter-spacing:3px;text-transform:uppercase;opacity:0.85;">Entle Off Grid Estate</p>
+            <h1 style="margin:8px 0 0;color:#ffffff;font-size:24px;font-weight:600;">${escapeHtml(input.subject.trim())}</h1>
+          </td></tr>
+          <tr><td style="padding:28px 32px;">
+            <p style="margin:0 0 14px;color:#2a1a12;font-size:15px;line-height:1.6;">${greeting}</p>
+            ${bodyToHtml(input.body.trim())}
+            <p style="margin:18px 0 0;color:#6a5a52;font-size:13px;line-height:1.6;">${CALL_CTA}</p>
+          </td></tr>
+          <tr><td style="padding:18px 32px;border-top:1px solid #f0eae4;color:#9a8a82;font-size:12px;">
+            183 Lakeview, Bloemfontein · 067 366 2302 · Fri to Sun, 11:00 to 18:00
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body></html>`;
+
+  const text = `${input.name?.trim() ? `Hi ${input.name.trim()},` : "Hi there,"}\n\n${input.body.trim()}\n\nEntle Off Grid Estate · ${PHONE}`;
+
+  return {
+    to,
+    subject: `${input.subject.trim()} · Entle Off Grid Estate`,
+    text,
+    html,
+  };
+}
+
+/**
+ * Queue a marketing / specials email (does not wait for the 30s gap / SMTP).
+ */
+export function queueMarketingEmail(input: {
+  to: string;
+  name?: string | null;
+  subject: string;
+  body: string;
+}): boolean {
+  const transport = getTransport();
+  const prepared = prepareMarketingMail(input);
+  if (!transport || !prepared) return false;
+
+  enqueueEmailDetached(async () => {
+    try {
+      await transport.sendMail({
+        from: fromAddress(),
+        to: prepared.to,
+        subject: prepared.subject,
+        text: prepared.text,
+        html: prepared.html,
+      });
+    } catch (err) {
+      console.error(
+        "[email] broadcast failed:",
+        err instanceof Error ? err.message : err
+      );
+    }
+  });
+  return true;
+}
+
+/** Queue a marketing email (same as queueMarketingEmail; async for older callers). */
+export async function sendMarketingEmail(input: {
+  to: string;
+  name?: string | null;
+  subject: string;
+  body: string;
+}): Promise<boolean> {
+  return queueMarketingEmail(input);
 }

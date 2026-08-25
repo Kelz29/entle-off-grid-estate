@@ -11,9 +11,10 @@ export const YOCO_CURRENCY = process.env.YOCO_CURRENCY ?? "ZAR";
 export interface YocoCheckout {
   id: string;
   redirectUrl: string;
-  status: string; // "created" | ... | "completed"
+  status: string; // "created" | "started" | "processing" | "completed"
   amount?: number;
   currency?: string;
+  paymentId?: string;
   metadata?: Record<string, unknown>;
 }
 

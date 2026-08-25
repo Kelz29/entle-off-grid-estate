@@ -13,18 +13,17 @@ import {
   BadEventTypeError,
 } from "@/lib/calendly/config";
 import { parseIsoAssumeUtc, toZonedIso } from "@/lib/calendly/time";
+import { isAdminAuthorized, requireAdminSession } from "@/lib/admin-auth";
+import { canManageSeats } from "@/lib/admin-roles";
 import type { ServiceRow } from "@/lib/calendly/types";
 
-// Admin-only: per-slot seat management. Both verbs require the admin token.
-function authorized(request: Request): boolean {
-  const expected = process.env.ADMIN_TOKEN;
-  if (!expected) return false;
-  const url = new URL(request.url);
-  const token =
-    url.searchParams.get("token") ??
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
-    "";
-  return token === expected;
+// Admin-only: per-slot seat management. Both verbs require admin auth.
+
+async function authorizeSeats(request: Request): Promise<boolean> {
+  const session = await requireAdminSession(request);
+  if (session) return canManageSeats(session.role);
+  // Legacy token: treat as owner-level
+  return await isAdminAuthorized(request);
 }
 
 async function resolveServiceId(eventType: string): Promise<number | null> {
@@ -39,7 +38,7 @@ async function resolveServiceId(eventType: string): Promise<number | null> {
 // GET /api/v1/calendly/admin/slots?event_type=&date=YYYY-MM-DD
 // Every slot for that day with booked / capacity / remaining / held.
 export async function GET(request: Request) {
-  if (!authorized(request)) {
+  if (!(await authorizeSeats(request))) {
     return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
   }
   const url = new URL(request.url);
@@ -85,7 +84,7 @@ export async function GET(request: Request) {
 //     via a manual hold; capacity stays fixed).
 //   { event_type, start_time, reset:true } → clear the manual hold.
 export async function PATCH(request: Request) {
-  if (!authorized(request)) {
+  if (!(await authorizeSeats(request))) {
     return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
   }
   let body: {

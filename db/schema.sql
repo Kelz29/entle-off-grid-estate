@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS customers (
 );
 
 CREATE TABLE IF NOT EXISTS bookings (
-  id               SERIAL PRIMARY KEY,
+  id               UUID        PRIMARY KEY,
   business_id      INTEGER     NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
   service_id       INTEGER     NOT NULL REFERENCES services(id)  ON DELETE CASCADE,
   customer_id      INTEGER     NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS bookings (
   status           TEXT        NOT NULL DEFAULT 'active'
                      CHECK (status IN ('active', 'cancelled', 'pending')),
   guests           INTEGER     NOT NULL DEFAULT 1,
+  cars             INTEGER,                                -- car-wash only; null otherwise
+  car_types        JSONB,                                  -- array of car type ids
   is_exclusive     BOOLEAN     NOT NULL DEFAULT true, -- copied from service.exclusive at create
   seen             BOOLEAN     NOT NULL DEFAULT false, -- admin has viewed this booking notification
   -- Guest details snapshotted at booking time so a booking always shows the
@@ -79,9 +81,10 @@ CREATE TABLE IF NOT EXISTS bookings (
   guest_email      TEXT,
   guest_phone      TEXT,
   notes            TEXT,
+  special_request  TEXT,        -- guest occasion / prep note (not priced)
   payment_provider TEXT        NOT NULL DEFAULT 'yoco',
   payment_status   TEXT        NOT NULL DEFAULT 'unpaid'
-                     CHECK (payment_status IN ('unpaid', 'paid', 'refunded')),
+                     CHECK (payment_status IN ('unpaid', 'paid', 'partially_paid', 'refunded')),
   checkout_id      TEXT,        -- Yoco checkout id (ch_...) while payment is pending
   payment_id       TEXT,        -- Yoco payment id once paid (from webhook)
   payment_amount_cents INTEGER, -- amount actually charged, in cents
@@ -124,3 +127,17 @@ BEGIN
       ) WHERE (status <> 'cancelled' AND is_exclusive);
   END IF;
 END$$;
+
+-- Guest special request (occasion / prep). Safe to re-run.
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS special_request TEXT;
+
+CREATE TABLE IF NOT EXISTS admin_users (
+  id            SERIAL PRIMARY KEY,
+  username      TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  display_name  TEXT NOT NULL,
+  role          TEXT NOT NULL DEFAULT 'staff',
+  is_active     BOOLEAN NOT NULL DEFAULT true,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);

@@ -17,7 +17,7 @@ export function Experiences() {
       <div className="mx-auto max-w-6xl">
         <div className="mb-10 flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-xs tracking-[0.3em] text-eoe-ivory/70">
+            <p className="text-xs tracking-[0.3em] text-eoe-ivory/90">
               EXPERIENCES
             </p>
             <h2 className="mt-3 font-display text-3xl tracking-[0.18em] md:text-4xl">
@@ -26,7 +26,7 @@ export function Experiences() {
               long after they end.
             </h2>
           </div>
-          <p className="max-w-sm text-sm leading-relaxed text-eoe-ivory/80">
+          <p className="max-w-sm text-sm leading-relaxed text-eoe-ivory/95">
             From brunch series and chef&apos;s tables to pop ups and creative
             residencies, the estate is a canvas for experiences that feel
             deeply personal.
@@ -62,7 +62,7 @@ export function Experiences() {
                   <h3 className="font-display text-xl tracking-[0.14em]">
                     {reel.title}
                   </h3>
-                  <p className="mt-1 text-xs text-eoe-ivory/75">{reel.blurb}</p>
+                  <p className="mt-1 text-xs text-eoe-ivory/90">{reel.blurb}</p>
                 </div>
               </HoverVideo>
             </motion.button>

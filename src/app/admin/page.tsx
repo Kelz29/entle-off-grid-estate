@@ -1,15 +1,32 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import useSWR from "swr";
+import {
+  playNotifySound,
+  unlockNotifySound,
+} from "@/lib/admin-notify-sound";
+import {
+  CAR_TYPES,
+  MAX_CARS_PER_SESSION,
+  carWashMinimumCents,
+  isCarWashService,
+} from "@/lib/calendly/car-wash";
+import {
+  ADMIN_ROLES,
+  canAccessSection,
+  defaultSectionForRole,
+  type AdminRole,
+  type AdminSection as RoleSection,
+} from "@/lib/admin-roles";
 
 const BUSINESS_ID = process.env.NEXT_PUBLIC_BUSINESS_ID ?? "1";
-const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN;
 const VENUE_TZ = "Africa/Johannesburg";
 
 // Gold used for fills / active states (readable on white as a fill, not as text).
-const GOLD = "#9a6552";
-const GOLD_TEXT = "#9a6552"; // clay, legible on white (4.8:1)
+const GOLD = "#7a4f3f";
+const GOLD_TEXT = "#7a4f3f"; // matches --eoe-espresso
 
 type ScheduledEvent = {
   uri: string;
@@ -20,9 +37,14 @@ type ScheduledEvent = {
   event_type: string;
   invitee: { name: string; email: string; phone: string | null };
   guests: number;
+  cars: number | null;
+  car_types?: string[] | null;
+  car_labels?: string[] | null;
   notes: string | null;
+  special_request?: string | null;
   payment_status: string;
   pay_on_arrival?: boolean;
+  balance_due_on_arrival?: boolean;
   payment_provider: string;
   payment_amount_cents?: number | null;
   seen: boolean;
@@ -32,12 +54,18 @@ type ScheduledEvent = {
 type EventType = {
   uri: string;
   name: string;
+  slug?: string;
   color: string;
   exclusive?: boolean;
   capacity?: number;
+  price_cents?: number;
 };
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+function adminFetch(url: string, init?: RequestInit) {
+  return fetch(url, { ...init, credentials: "same-origin" });
+}
+
+const fetcher = (url: string) => adminFetch(url).then((r) => r.json());
 
 // ---------- helpers ----------
 function bookingId(uri: string) {
@@ -66,6 +94,20 @@ function venueTodayKey() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: VENUE_TZ }).format(
     new Date()
   );
+}
+// Venue open Fri(5)/Sat(6)/Sun(0) — used by seats date picker.
+function isOpenDayKey(key: string) {
+  const d = new Date(`${key}T12:00:00Z`);
+  const day = d.getUTCDay(); // Sun=0 … Sat=6
+  return day === 0 || day === 5 || day === 6;
+}
+function nearestOpenDayKey(fromKey?: string) {
+  let key = fromKey ?? venueTodayKey();
+  for (let i = 0; i < 7; i++) {
+    if (isOpenDayKey(key)) return key;
+    key = addDaysKey(key, 1);
+  }
+  return key;
 }
 function addDaysKey(key: string, days: number) {
   const d = new Date(`${key}T00:00:00Z`);
@@ -96,36 +138,112 @@ function relativeDay(key: string, today: string) {
   return longDay(key);
 }
 
+function SpecialRequestBanner({
+  text,
+  compact,
+}: {
+  text: string | null | undefined;
+  compact?: boolean;
+}) {
+  const value = text?.trim();
+  if (!value) return null;
+  if (compact) {
+    return (
+      <span className="mt-1 inline-flex max-w-full items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-900">
+        Special request
+      </span>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-amber-300/80 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-950">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-800/90">
+        Prepare: special request
+      </p>
+      <p className="mt-1 whitespace-pre-line">{value}</p>
+    </div>
+  );
+}
+
 type StatusFilter = "upcoming" | "today" | "past" | "cancelled" | "all";
 type View = "agenda" | "table";
+type AdminSection = RoleSection;
+type PaymentFilter = "all" | "paid" | "partial" | "awaiting" | "arrival";
+
+const NAV: { id: AdminSection; label: string; hint: string }[] = [
+  { id: "overview", label: "Overview", hint: "KPIs and load" },
+  { id: "bookings", label: "Bookings", hint: "Agenda and table" },
+  { id: "payments", label: "Payments", hint: "Deposits and dues" },
+  { id: "clients", label: "Clients", hint: "Emails and specials" },
+  { id: "seats", label: "Seats", hint: "Capacity and holds" },
+  { id: "users", label: "Users", hint: "Staff accounts and roles" },
+];
+
+type MeResponse = {
+  authenticated: boolean;
+  user: string;
+  role: AdminRole;
+  sections: AdminSection[];
+  permissions: {
+    users: boolean;
+    broadcast: boolean;
+    seats: boolean;
+    payments: boolean;
+    clients: boolean;
+  };
+};
 
 // ---------- page ----------
 export default function AdminPage() {
+  const router = useRouter();
+  const [section, setSection] = useState<AdminSection>("overview");
+  const [navOpen, setNavOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("upcoming");
   const [experience, setExperience] = useState<string>("all");
   const [q, setQ] = useState("");
   const [view, setView] = useState<View>("agenda");
+  const [payFilter, setPayFilter] = useState<PaymentFilter>("all");
+  const [detailUri, setDetailUri] = useState<string | null>(null);
 
   const today = venueTodayKey();
 
+  const { data: me } = useSWR<MeResponse>("/api/admin/me", fetcher, {
+    revalidateOnFocus: false,
+  });
+  const role = me?.role ?? "staff";
+  const allowedSections = useMemo(
+    () => new Set((me?.sections ?? ["overview", "bookings"]) as AdminSection[]),
+    [me?.sections]
+  );
+  const navItems = useMemo(
+    () => NAV.filter((n) => allowedSections.has(n.id)),
+    [allowedSections]
+  );
+
+  useEffect(() => {
+    if (!me?.sections?.length) return;
+    if (!allowedSections.has(section)) {
+      setSection(defaultSectionForRole(role));
+    }
+  }, [me, allowedSections, section, role]);
+
+  async function signOut() {
+    await adminFetch("/api/admin/logout", { method: "POST" });
+    router.replace("/admin/login");
+    router.refresh();
+  }
   const { data, error, isLoading, mutate } = useSWR<{
     collection: ScheduledEvent[];
   }>(
-    ADMIN_TOKEN
-      ? `/api/v1/calendly/scheduled_events?business_id=${BUSINESS_ID}&count=200`
-      : null,
+    `/api/v1/calendly/scheduled_events?business_id=${BUSINESS_ID}&count=500`,
     fetcher,
     { refreshInterval: 20000 }
   );
   const { data: typesData, mutate: mutateTypes } = useSWR<{
     collection: EventType[];
   }>(
-    ADMIN_TOKEN
-      ? `/api/v1/calendly/event_types?business_id=${BUSINESS_ID}`
-      : null,
+    `/api/v1/calendly/event_types?business_id=${BUSINESS_ID}`,
     fetcher
   );
-  const [showSeats, setShowSeats] = useState(false);
   const [showNew, setShowNew] = useState(false);
 
   const all = useMemo(() => data?.collection ?? [], [data]);
@@ -141,21 +259,30 @@ export default function AdminPage() {
     for (const t of types) m.set(serviceId(t.uri), t.exclusive === false);
     return (evUri: string) => m.get(serviceId(evUri)) ?? false;
   }, [types]);
+  const carWashFor = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const t of types) m.set(serviceId(t.uri), isCarWashService(t.slug));
+    return (evUri: string) => m.get(serviceId(evUri)) ?? false;
+  }, [types]);
 
   const stats = useMemo(() => {
     let upcoming = 0,
       todayCount = 0,
       cancelled = 0,
       deposits = 0,
-      awaiting = 0;
+      awaiting = 0,
+      partial = 0;
     for (const b of all) {
       const key = dayKey(b.start_time);
       if (b.status === "canceled") cancelled++;
       else {
         if (key >= today) upcoming++;
         if (key === today) todayCount++;
-        if (b.payment_status === "paid") deposits += b.payment_amount_cents ?? 0;
-        else if (!b.pay_on_arrival) awaiting++; // manual bookings settle at the venue
+        if (b.payment_status === "paid" || b.payment_status === "partially_paid") {
+          deposits += b.payment_amount_cents ?? 0;
+        }
+        if (b.payment_status === "partially_paid") partial++;
+        else if (b.payment_status === "unpaid" && !b.pay_on_arrival) awaiting++;
       }
     }
     return {
@@ -165,6 +292,7 @@ export default function AdminPage() {
       cancelled,
       deposits,
       awaiting,
+      partial,
     };
   }, [all, today]);
 
@@ -227,9 +355,64 @@ export default function AdminPage() {
     return Array.from(groups.entries());
   }, [sorted]);
 
+  const paymentRows = useMemo(() => {
+    return all
+      .filter((b) => b.status !== "canceled")
+      .filter((b) => {
+        if (payFilter === "paid") return b.payment_status === "paid";
+        if (payFilter === "partial")
+          return b.payment_status === "partially_paid";
+        if (payFilter === "awaiting")
+          return b.payment_status === "unpaid" && !b.pay_on_arrival;
+        if (payFilter === "arrival") return Boolean(b.pay_on_arrival);
+        return true;
+      })
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }, [all, payFilter]);
+
+  const go = (id: AdminSection) => {
+    if (!allowedSections.has(id)) return;
+    setSection(id);
+    setNavOpen(false);
+  };
+
+  const softRefresh = useCallback(async () => {
+    await Promise.all([mutate(), mutateTypes()]);
+  }, [mutate, mutateTypes]);
+
+  const openBooking = useCallback(
+    (b: ScheduledEvent) => {
+      const key = dayKey(b.start_time);
+      setSection("bookings");
+      setNavOpen(false);
+      setExperience("all");
+      setQ("");
+      if (b.status === "canceled") setStatusFilter("cancelled");
+      else if (key === today) setStatusFilter("today");
+      else if (key < today) setStatusFilter("past");
+      else setStatusFilter("upcoming");
+      setDetailUri(b.uri);
+    },
+    [today]
+  );
+
+  const sectionTitle =
+    navItems.find((n) => n.id === section)?.label ?? "Dashboard";
+
+  const detailBooking = useMemo(
+    () => (detailUri ? (all.find((b) => b.uri === detailUri) ?? null) : null),
+    [all, detailUri]
+  );
+
+  useEffect(() => {
+    if (detailUri && !all.some((b) => b.uri === detailUri)) {
+      setDetailUri(null);
+    }
+  }, [all, detailUri]);
+
   const cancel = async (uri: string) => {
     const id = bookingId(uri);
-    await fetch(`/api/v1/calendly/scheduled_events/${id}?token=${ADMIN_TOKEN}`, {
+    await adminFetch(`/api/v1/calendly/scheduled_events/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "canceled" }),
@@ -237,11 +420,30 @@ export default function AdminPage() {
     await mutate();
   };
 
+  // Free a website checkout hold (unpaid, not pay-on-arrival). Public release
+  // endpoint is safe: never touches paid bookings.
+  const releaseHold = async (uri: string) => {
+    const id = bookingId(uri);
+    const res = await adminFetch("/api/bookings/release", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bookingId: id }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return body.detail ?? "Could not release hold";
+    }
+    const body = await res.json().catch(() => ({}));
+    if (!body.released) return "Hold was already released or paid";
+    await mutate();
+    return null;
+  };
+
   // Returns null on success, or an error message (e.g. slot full).
   const reschedule = async (uri: string, startIso: string) => {
     const id = bookingId(uri);
-    const res = await fetch(
-      `/api/v1/calendly/scheduled_events/${id}?token=${ADMIN_TOKEN}`,
+    const res = await adminFetch(
+      `/api/v1/calendly/scheduled_events/${id}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -257,10 +459,11 @@ export default function AdminPage() {
   };
 
   // Change a booking's guest count. Returns null on success or an error message.
+  // Paid deposit is never adjusted (no refunds / no online top-up).
   const editGuests = async (uri: string, guests: number) => {
     const id = bookingId(uri);
-    const res = await fetch(
-      `/api/v1/calendly/scheduled_events/${id}?token=${ADMIN_TOKEN}`,
+    const res = await adminFetch(
+      `/api/v1/calendly/scheduled_events/${id}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -270,6 +473,64 @@ export default function AdminPage() {
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       return body.detail ?? "Could not update guests";
+    }
+    await mutate();
+    return null;
+  };
+
+  const editCars = async (uri: string, carTypes: string[] | null) => {
+    const id = bookingId(uri);
+    const res = await adminFetch(
+      `/api/v1/calendly/scheduled_events/${id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ car_types: carTypes }),
+      }
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return body.detail ?? "Could not update cars";
+    }
+    await mutate();
+    return null;
+  };
+
+  const editSpecialRequest = async (
+    uri: string,
+    specialRequest: string | null
+  ) => {
+    const id = bookingId(uri);
+    const res = await adminFetch(
+      `/api/v1/calendly/scheduled_events/${id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ special_request: specialRequest }),
+      }
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return body.detail ?? "Could not update special request";
+    }
+    await mutate();
+    return null;
+  };
+
+  /** Mark partially_paid as settled (balance collected at venue). */
+  const settlePayment = async (uri: string) => {
+    const id = bookingId(uri);
+    const res = await adminFetch(
+      `/api/v1/calendly/scheduled_events/${id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payment_status: "paid" }),
+      }
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return body.detail ?? "Could not mark settled";
     }
     await mutate();
     return null;
@@ -287,17 +548,38 @@ export default function AdminPage() {
     () => all.filter((b) => !b.seen).length,
     [all]
   );
+  const prevUnseenRef = useRef<number | null>(null);
+  useEffect(() => {
+    const unlock = () => unlockNotifySound();
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, []);
+  useEffect(() => {
+    if (!data) return;
+    const prev = prevUnseenRef.current;
+    prevUnseenRef.current = unseenCount;
+    if (prev === null) return; // skip initial load
+    if (unseenCount > prev) playNotifySound();
+  }, [data, unseenCount]);
   const toggleSeen = async (uri: string, seen: boolean) => {
     const id = bookingId(uri);
-    await fetch(`/api/v1/calendly/scheduled_events/${id}?token=${ADMIN_TOKEN}`, {
+    await adminFetch(`/api/v1/calendly/scheduled_events/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ seen }),
     });
     await mutate();
   };
+  const openFromNotification = async (b: ScheduledEvent) => {
+    if (!b.seen) await toggleSeen(b.uri, true);
+    openBooking(b);
+  };
   const markAllSeen = async () => {
-    await fetch(`/api/v1/calendly/admin/seen?token=${ADMIN_TOKEN}`, {
+    await adminFetch(`/api/v1/calendly/admin/seen`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ seen: true, business_id: Number(BUSINESS_ID) }),
@@ -306,177 +588,1025 @@ export default function AdminPage() {
   };
 
   return (
-    <main className="min-h-screen bg-eoe-ivory px-4 py-12 text-eoe-espresso md:px-8">
-      <div className="mx-auto max-w-7xl">
-        {/* Header */}
-        <header className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p
-              className="text-[11px] uppercase tracking-[0.3em]"
-              style={{ color: GOLD_TEXT }}
+    <div className="min-h-screen bg-eoe-ivory text-eoe-ink md:flex">
+      {/* Mobile nav backdrop */}
+      {navOpen && (
+        <button
+          type="button"
+          aria-label="Close menu"
+          onClick={() => setNavOpen(false)}
+          className="fixed inset-0 z-40 bg-eoe-ink/40 md:hidden"
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex w-[min(18rem,88vw)] flex-col border-r border-eoe-espresso/10 bg-white transition-transform md:static md:w-64 md:translate-x-0 lg:w-72 ${
+          navOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="border-b border-eoe-espresso/10 px-5 py-5 md:py-6">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p
+                className="text-[10px] uppercase tracking-[0.28em]"
+                style={{ color: GOLD_TEXT }}
+              >
+                Entle Off Grid Estate
+              </p>
+              <p className="mt-2 font-display text-2xl tracking-wide text-eoe-ink">
+                Admin
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setNavOpen(false)}
+              className="rounded-full border border-eoe-espresso/15 px-3 py-2 text-[11px] uppercase tracking-[0.14em] text-eoe-espresso md:hidden"
+              aria-label="Close menu"
             >
-              Entle Off-Grid Estate
-            </p>
-            <h1 className="mt-2 font-display text-4xl tracking-[0.12em] text-eoe-espresso">
-              Bookings dashboard
-            </h1>
+              Close
+            </button>
           </div>
-          <div className="flex items-center gap-2">
+          {me?.user && (
+            <p className="mt-3 text-[11px] text-eoe-espresso/75">
+              Signed in as{" "}
+              <span className="font-medium text-eoe-ink">{me.user}</span>
+              <span className="mt-0.5 block capitalize text-eoe-espresso/60">
+                {role} access
+              </span>
+            </p>
+          )}
+        </div>
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
+          {navItems.map((item) => {
+            const active = section === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => go(item.id)}
+                className={`flex min-h-12 w-full flex-col justify-center rounded-2xl px-3.5 py-3 text-left transition ${
+                  active
+                    ? "bg-eoe-espresso text-eoe-ivory"
+                    : "text-eoe-ink/80 hover:bg-eoe-ivory"
+                }`}
+              >
+                <span className="text-[12px] font-medium uppercase tracking-[0.16em]">
+                  {item.label}
+                </span>
+                <span
+                  className={`mt-0.5 text-[11px] ${
+                    active ? "text-eoe-ivory/70" : "text-eoe-espresso/70"
+                  }`}
+                >
+                  {item.hint}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+        <div className="space-y-2 border-t border-eoe-espresso/10 px-3 py-4">
+          <a
+            href="/"
+            target="_blank"
+            rel="noreferrer"
+            className="flex min-h-11 w-full items-center justify-center rounded-full border border-eoe-espresso/15 px-3 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso hover:bg-eoe-ivory"
+          >
+            View site
+          </a>
+          <button
+            type="button"
+            onClick={() => void softRefresh()}
+            className="min-h-11 w-full rounded-full border border-eoe-espresso/15 px-3 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso hover:bg-eoe-ivory"
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={signOut}
+            className="min-h-11 w-full rounded-full border border-eoe-espresso/15 px-3 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso hover:bg-eoe-ivory"
+          >
+            Sign out
+          </button>
+        </div>
+      </aside>
+
+      {/* Main */}
+      <div className="min-w-0 flex-1">
+        <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-3 border-b border-eoe-espresso/10 bg-eoe-ivory/95 px-3 py-3 backdrop-blur sm:px-4 sm:py-4 md:px-8">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={() => setNavOpen(true)}
+              className="min-h-11 shrink-0 rounded-full border border-eoe-espresso/15 px-3.5 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso md:hidden"
+            >
+              Menu
+            </button>
+            <div className="min-w-0">
+              <h1 className="truncate font-display text-xl tracking-wide text-eoe-ink sm:text-2xl md:text-3xl">
+                {sectionTitle}
+              </h1>
+              <p className="hidden text-[11px] uppercase tracking-[0.2em] text-eoe-espresso/70 sm:block">
+                {navItems.find((n) => n.id === section)?.hint}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <a
+              href="/"
+              target="_blank"
+              rel="noreferrer"
+              className="min-h-11 rounded-full border border-eoe-espresso/15 px-3.5 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso hover:bg-white"
+            >
+              Site
+            </a>
             <NotificationsBell
               items={notifications}
               unseenCount={unseenCount}
-              onToggleSeen={toggleSeen}
+              onOpen={openFromNotification}
               onMarkAll={markAllSeen}
             />
-            <button
-              onClick={() => setShowNew(true)}
-              className="rounded-full bg-eoe-espresso px-4 py-2 text-[11px] uppercase tracking-[0.22em] text-eoe-ivory transition hover:bg-eoe-espresso/90"
-            >
-              ＋ New booking
-            </button>
-            <button
-              onClick={() => setShowSeats((v) => !v)}
-              className="rounded-full border border-eoe-espresso/20 px-4 py-2 text-[11px] uppercase tracking-[0.22em] text-eoe-espresso transition hover:bg-eoe-espresso/5"
-            >
-              Manage seats
-            </button>
-            <button
-              onClick={() => window.location.reload()}
-              className="rounded-full border border-eoe-gold px-4 py-2 text-[11px] uppercase tracking-[0.22em] text-eoe-espresso transition hover:bg-eoe-gold/15"
-            >
-              ↻ Refresh
-            </button>
+            {(section === "bookings" || section === "overview") &&
+              canAccessSection(role, "bookings") && (
+              <button
+                onClick={() => setShowNew(true)}
+                className="min-h-11 rounded-full bg-eoe-espresso px-3.5 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-ivory transition hover:bg-eoe-espresso/90 sm:px-4 sm:tracking-[0.22em]"
+              >
+                New booking
+              </button>
+            )}
           </div>
         </header>
 
-        {showSeats && (
-          <SeatSettings services={types} onSaved={() => mutateTypes()} />
-        )}
+        <main className="px-3 py-6 sm:px-4 sm:py-8 md:px-8">
+          {showNew && (
+            <NewBookingModal
+              types={types}
+              onClose={() => setShowNew(false)}
+              onCreated={async () => {
+                setShowNew(false);
+                await mutate();
+              }}
+            />
+          )}
 
-        {showNew && (
-          <NewBookingModal
-            types={types}
-            onClose={() => setShowNew(false)}
-            onCreated={async () => {
-              setShowNew(false);
-              await mutate();
-            }}
-          />
-        )}
+          {error && (
+            <p className="mb-6 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">
+              Failed to load bookings.
+            </p>
+          )}
 
-        {!ADMIN_TOKEN && (
-          <p className="mt-6 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">
-            Set <code className="text-xs">NEXT_PUBLIC_ADMIN_TOKEN</code> to
-            enable the admin view.
-          </p>
-        )}
-        {error && (
-          <p className="mt-6 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">
-            Failed to load bookings.
-          </p>
-        )}
-
-        {/* KPIs */}
-        <section className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <Kpi label="Upcoming" value={stats.upcoming} tone="primary" />
-          <Kpi label="Today" value={stats.today} />
-          <Kpi label="Deposits collected" value={money(stats.deposits)} />
-          <Kpi label="Awaiting payment" value={stats.awaiting} tone="warn" />
-          <Kpi label="Cancelled" value={stats.cancelled} tone="muted" />
-        </section>
-
-        {/* 14-day load */}
-        <LoadStrip days={strip.days} max={strip.max} today={today} />
-
-        {/* Controls */}
-        <section className="mt-8 flex flex-wrap items-center gap-3">
-          <Segmented
-            value={statusFilter}
-            onChange={setStatusFilter}
-            options={[
-              ["upcoming", "Upcoming"],
-              ["today", "Today"],
-              ["past", "Past"],
-              ["cancelled", "Cancelled"],
-              ["all", "All"],
-            ]}
-          />
-          <select
-            value={experience}
-            onChange={(e) => setExperience(e.target.value)}
-            className="rounded-full border border-eoe-espresso/15 bg-white px-4 py-2 text-sm text-eoe-espresso outline-none focus:border-eoe-gold"
-          >
-            <option value="all">All experiences</option>
-            {types.map((t) => (
-              <option key={t.uri} value={serviceId(t.uri)}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search guest, email, phone…"
-            className="min-w-[200px] flex-1 rounded-full border border-eoe-espresso/15 bg-white px-4 py-2 text-sm text-eoe-espresso outline-none placeholder:text-eoe-espresso/40 focus:border-eoe-gold"
-          />
-          <Toggle value={view} onChange={setView} />
-        </section>
-
-        {/* Results */}
-        <p className="mt-5 text-xs uppercase tracking-[0.2em] text-eoe-espresso/45">
-          {sorted.length} {sorted.length === 1 ? "booking" : "bookings"}
-        </p>
-
-        {isLoading && (
-          <p className="mt-4 text-sm text-eoe-espresso/70">Loading bookings…</p>
-        )}
-        {!isLoading && sorted.length === 0 && (
-          <div className="mt-6 rounded-2xl border border-dashed border-eoe-espresso/15 bg-white/60 px-6 py-12 text-center text-sm text-eoe-espresso/60">
-            No bookings match this view.
-          </div>
-        )}
-
-        {view === "agenda" ? (
-          <div className="mt-4 space-y-8">
-            {grouped.map(([key, items]) => (
-              <div key={key}>
-                <div className="flex items-baseline justify-between border-b border-eoe-gold/40 pb-2">
-                  <h2 className="font-display text-xl tracking-wide text-eoe-espresso">
-                    {relativeDay(key, today)}
-                  </h2>
-                  <span className="text-xs text-eoe-espresso/50">
-                    {items.length} · {items.reduce((s, b) => s + b.guests, 0)}{" "}
-                    guests
-                  </span>
-                </div>
-                <div className="mt-3 space-y-3">
-                  {items.map((b) => (
-                    <BookingCard
-                      key={b.uri}
-                      b={b}
-                      color={colorFor(b.event_type)}
-                      shared={sharedFor(b.event_type)}
-                      onCancel={cancel}
-                      onReschedule={reschedule}
-                      onEditGuests={editGuests}
+          {section === "overview" && (
+            <div className="space-y-8">
+              <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                <Kpi
+                  label="Upcoming"
+                  value={stats.upcoming}
+                  tone="primary"
+                  onClick={() => {
+                    setStatusFilter("upcoming");
+                    go("bookings");
+                  }}
+                />
+                <Kpi
+                  label="Today"
+                  value={stats.today}
+                  onClick={() => {
+                    setStatusFilter("today");
+                    go("bookings");
+                  }}
+                />
+                {canAccessSection(role, "payments") && (
+                  <>
+                    <Kpi
+                      label="Deposits collected"
+                      value={money(stats.deposits)}
+                      onClick={() => {
+                        setPayFilter("paid");
+                        go("payments");
+                      }}
                     />
+                    <Kpi
+                      label="Awaiting payment"
+                      value={stats.awaiting}
+                      tone="warn"
+                      onClick={() => {
+                        setPayFilter("awaiting");
+                        go("payments");
+                      }}
+                    />
+                    <Kpi
+                      label="Balance due"
+                      value={stats.partial}
+                      tone="warn"
+                      onClick={() => {
+                        setPayFilter("partial");
+                        go("payments");
+                      }}
+                    />
+                  </>
+                )}
+                <Kpi
+                  label="Cancelled"
+                  value={stats.cancelled}
+                  tone="muted"
+                  onClick={() => {
+                    setStatusFilter("cancelled");
+                    go("bookings");
+                  }}
+                />
+              </section>
+              <LoadStrip days={strip.days} max={strip.max} today={today} />
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => go("bookings")}
+                  className="min-h-11 rounded-full border border-eoe-espresso/20 px-4 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso hover:bg-white"
+                >
+                  Open bookings
+                </button>
+                {canAccessSection(role, "payments") && (
+                  <button
+                    type="button"
+                    onClick={() => go("payments")}
+                    className="min-h-11 rounded-full border border-eoe-espresso/20 px-4 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso hover:bg-white"
+                  >
+                    Review payments
+                  </button>
+                )}
+                {canAccessSection(role, "seats") && (
+                  <button
+                    type="button"
+                    onClick={() => go("seats")}
+                    className="min-h-11 rounded-full border border-eoe-espresso/20 px-4 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso hover:bg-white"
+                  >
+                    Manage seats
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {section === "bookings" && (
+            <div>
+              <section className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
+                <div className="-mx-1 overflow-x-auto px-1 pb-1">
+                  <Segmented
+                    value={statusFilter}
+                    onChange={setStatusFilter}
+                    options={[
+                      ["upcoming", "Upcoming"],
+                      ["today", "Today"],
+                      ["past", "Past"],
+                      ["cancelled", "Cancelled"],
+                      ["all", "All"],
+                    ]}
+                  />
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                  <select
+                    value={experience}
+                    onChange={(e) => setExperience(e.target.value)}
+                    className="min-h-11 w-full rounded-full border border-eoe-espresso/15 bg-white px-4 py-2.5 text-sm text-eoe-espresso outline-none focus:border-eoe-gold sm:w-auto"
+                  >
+                    <option value="all">All experiences</option>
+                    {types.map((t) => (
+                      <option key={t.uri} value={serviceId(t.uri)}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Search guest, email, phone"
+                    className="min-h-11 min-w-0 flex-1 rounded-full border border-eoe-espresso/15 bg-white px-4 py-2.5 text-sm text-eoe-espresso outline-none placeholder:text-eoe-espresso/70 focus:border-eoe-gold sm:min-w-[200px]"
+                  />
+                  <Toggle value={view} onChange={setView} />
+                </div>
+              </section>
+
+              <p className="mt-5 text-xs uppercase tracking-[0.2em] text-eoe-espresso/70">
+                {sorted.length} {sorted.length === 1 ? "booking" : "bookings"}
+              </p>
+
+              {isLoading && (
+                <p className="mt-4 text-sm text-eoe-espresso/85">
+                  Loading bookings…
+                </p>
+              )}
+              {!isLoading && sorted.length === 0 && (
+                <div className="mt-6 rounded-2xl border border-dashed border-eoe-espresso/15 bg-white/60 px-6 py-12 text-center text-sm text-eoe-espresso/80">
+                  No bookings match this view.
+                </div>
+              )}
+
+              {view === "agenda" ? (
+                <div className="mt-4 space-y-8">
+                  {grouped.map(([key, items]) => (
+                    <div key={key}>
+                      <div className="flex items-baseline justify-between border-b border-eoe-gold/40 pb-2">
+                        <h2 className="font-display text-xl tracking-wide text-eoe-espresso">
+                          {relativeDay(key, today)}
+                        </h2>
+                        <span className="text-xs text-eoe-espresso/70">
+                          {items.length} ·{" "}
+                          {items.reduce((s, b) => s + b.guests, 0)} guests
+                        </span>
+                      </div>
+                      <div className="mt-3 space-y-3">
+                        {items.map((b) => (
+                          <BookingCard
+                            key={b.uri}
+                            b={b}
+                            color={colorFor(b.event_type)}
+                            shared={sharedFor(b.event_type)}
+                            onOpen={() => setDetailUri(b.uri)}
+                            onCancel={cancel}
+                            onReschedule={reschedule}
+                          />
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
+              ) : (
+                <TableView
+                  rows={sorted}
+                  colorFor={colorFor}
+                  today={today}
+                  activeUri={detailUri}
+                  onOpenDetail={setDetailUri}
+                />
+              )}
+            </div>
+          )}
+
+          {detailBooking && (
+            <BookingDetailModal
+              b={detailBooking}
+              color={colorFor(detailBooking.event_type)}
+              shared={sharedFor(detailBooking.event_type)}
+              allowsCars={carWashFor(detailBooking.event_type)}
+              onClose={() => setDetailUri(null)}
+              onCancel={cancel}
+              onReschedule={reschedule}
+              onEditGuests={editGuests}
+              onEditCars={editCars}
+              onEditSpecialRequest={editSpecialRequest}
+              onReleaseHold={releaseHold}
+              onSettlePayment={settlePayment}
+            />
+          )}
+
+          {section === "payments" && canAccessSection(role, "payments") && (
+            <div className="space-y-6">
+              <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Kpi
+                  label="Deposits collected"
+                  value={money(stats.deposits)}
+                  tone="primary"
+                  onClick={() => setPayFilter("paid")}
+                />
+                <Kpi
+                  label="Awaiting payment"
+                  value={stats.awaiting}
+                  tone="warn"
+                  onClick={() => setPayFilter("awaiting")}
+                />
+                <Kpi
+                  label="Balance due"
+                  value={stats.partial}
+                  tone="warn"
+                  onClick={() => setPayFilter("partial")}
+                />
+                <Kpi
+                  label="Pays at restaurant"
+                  value={
+                    all.filter(
+                      (b) => b.status !== "canceled" && b.pay_on_arrival
+                    ).length
+                  }
+                  onClick={() => setPayFilter("arrival")}
+                />
+              </section>
+              <div className="-mx-1 overflow-x-auto px-1 pb-1">
+                <Segmented
+                  value={payFilter}
+                  onChange={setPayFilter}
+                  options={[
+                    ["all", "All"],
+                    ["paid", "Paid"],
+                    ["partial", "Balance due"],
+                    ["awaiting", "Awaiting"],
+                    ["arrival", "At restaurant"],
+                  ]}
+                />
               </div>
-            ))}
-          </div>
-        ) : (
-          <TableView
-            rows={sorted}
-            colorFor={colorFor}
-            today={today}
-            sharedFor={sharedFor}
-            onCancel={cancel}
-            onReschedule={reschedule}
+              <p className="text-xs uppercase tracking-[0.2em] text-eoe-espresso/70">
+                {paymentRows.length}{" "}
+                {paymentRows.length === 1 ? "payment" : "payments"}
+              </p>
+              <PaymentsTable
+                rows={paymentRows}
+                colorFor={colorFor}
+                onOpenDetail={setDetailUri}
+              />
+            </div>
+          )}
+
+          {section === "clients" && canAccessSection(role, "clients") && (
+            <ClientsPanel canBroadcast={Boolean(me?.permissions?.broadcast)} />
+          )}
+
+          {section === "seats" && canAccessSection(role, "seats") && (
+            <SeatSettings services={types} onSaved={() => mutateTypes()} />
+          )}
+
+          {section === "users" && canAccessSection(role, "users") && (
+            <UsersPanel />
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+// ---------- clients / mass email ----------
+type ClientRow = {
+  id: number;
+  name: string;
+  email: string;
+  phone: string | null;
+  booking_count: number;
+  last_visit: string | null;
+};
+
+function ClientsPanel({ canBroadcast = true }: { canBroadcast?: boolean }) {
+  const { data, error, isLoading, mutate } = useSWR<{ collection: ClientRow[] }>(
+    `/api/admin/clients?business_id=${BUSINESS_ID}`,
+    fetcher
+  );
+  const clients = data?.collection ?? [];
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [hydrated, setHydrated] = useState(false);
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!hydrated && clients.length > 0) {
+      setSelected(new Set(clients.map((c) => c.email.toLowerCase())));
+      setHydrated(true);
+    }
+  }, [clients, hydrated]);
+
+  const toggle = (email: string) => {
+    const key = email.toLowerCase();
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const selectAll = () =>
+    setSelected(new Set(clients.map((c) => c.email.toLowerCase())));
+  const selectNone = () => setSelected(new Set());
+
+  const send = async () => {
+    if (!subject.trim() || !body.trim()) {
+      setMsg("Add a subject and message first.");
+      return;
+    }
+    if (selected.size === 0) {
+      setMsg("Select at least one client.");
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await adminFetch("/api/admin/broadcast", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          business_id: Number(BUSINESS_ID),
+          subject: subject.trim(),
+          body: body.trim(),
+          emails: [...selected],
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg(d.detail ?? "Could not send emails.");
+        return;
+      }
+      const gap = d.gap_seconds ?? 30;
+      const eta = d.eta_seconds;
+      const etaLabel =
+        typeof eta === "number" && eta > 0
+          ? eta < 60
+            ? `~${eta}s`
+            : `~${Math.ceil(eta / 60)} min`
+          : null;
+      setMsg(
+        `Queued ${d.queued} of ${d.total} (${gap}s apart)${
+          etaLabel ? ` · ${etaLabel}` : ""
+        }${d.skipped ? ` · ${d.skipped} skipped` : ""}.`
+      );
+      await mutate();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const inputCls =
+    "w-full rounded-2xl border border-eoe-espresso/15 bg-white px-3.5 py-2 text-sm text-eoe-espresso outline-none focus:border-eoe-gold";
+
+  return (
+    <div className="space-y-6">
+      <p className="max-w-2xl text-sm leading-relaxed text-eoe-espresso/85">
+        Guests who booked with a real email. Use this list for specials and
+        updates. Placeholder walk-in addresses are hidden. Emails are queued
+        and sent one at a time, 30 seconds apart.
+      </p>
+
+      {canBroadcast && (
+      <section className="rounded-2xl border border-eoe-espresso/12 bg-white p-4 shadow-sm sm:p-5">
+        <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/75">
+          Compose special
+        </p>
+        <div className="mt-3 space-y-3">
+          <input
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            placeholder="Subject (e.g. Weekend brunch special)"
+            className={inputCls}
           />
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            rows={6}
+            placeholder="Message to selected clients"
+            className={`${inputCls} rounded-2xl`}
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={send}
+              className="min-h-11 rounded-full bg-eoe-espresso px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-eoe-ivory hover:bg-eoe-espresso/90 disabled:opacity-40"
+            >
+              {busy
+                ? "Sending…"
+                : `Email ${selected.size} selected`}
+            </button>
+            {msg && (
+              <span className="text-xs text-eoe-espresso/80">{msg}</span>
+            )}
+          </div>
+        </div>
+      </section>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs uppercase tracking-[0.2em] text-eoe-espresso/70">
+          {clients.length} {clients.length === 1 ? "client" : "clients"}
+        </p>
+        {canBroadcast && (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={selectAll}
+            className="min-h-10 rounded-full border border-eoe-espresso/15 px-3 py-1.5 text-[10px] uppercase tracking-[0.16em] text-eoe-espresso hover:bg-white"
+          >
+            Select all
+          </button>
+          <button
+            type="button"
+            onClick={selectNone}
+            className="min-h-10 rounded-full border border-eoe-espresso/15 px-3 py-1.5 text-[10px] uppercase tracking-[0.16em] text-eoe-espresso hover:bg-white"
+          >
+            Clear
+          </button>
+        </div>
         )}
       </div>
-    </main>
+
+      {isLoading && (
+        <p className="text-sm text-eoe-espresso/85">Loading clients…</p>
+      )}
+      {error && (
+        <p className="text-sm text-rose-600">Could not load clients.</p>
+      )}
+      {!isLoading && clients.length === 0 && (
+        <div className="rounded-2xl border border-dashed border-eoe-espresso/15 bg-white/60 px-6 py-12 text-center text-sm text-eoe-espresso/80">
+          No bookable email clients yet.
+        </div>
+      )}
+
+      {clients.length > 0 && (
+        <div className="overflow-x-auto rounded-2xl border border-eoe-espresso/10 bg-white shadow-sm">
+          <table className="w-full min-w-[640px] text-left text-sm">
+            <thead className="bg-eoe-ivory text-[10px] uppercase tracking-[0.18em] text-eoe-espresso/70">
+              <tr>
+                {canBroadcast && <th className="px-4 py-3 font-medium"> </th>}
+                <th className="px-4 py-3 font-medium">Name</th>
+                <th className="px-4 py-3 font-medium">Email</th>
+                <th className="px-4 py-3 font-medium">Phone</th>
+                <th className="px-4 py-3 font-medium">Bookings</th>
+                <th className="px-4 py-3 font-medium">Last visit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {clients.map((c) => {
+                const key = c.email.toLowerCase();
+                const checked = selected.has(key);
+                return (
+                  <tr
+                    key={c.id}
+                    className="border-t border-eoe-espresso/8 text-eoe-ink"
+                  >
+                    {canBroadcast && (
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggle(c.email)}
+                        aria-label={`Select ${c.name}`}
+                      />
+                    </td>
+                    )}
+                    <td className="px-4 py-3">{c.name}</td>
+                    <td className="px-4 py-3">
+                      <a
+                        href={`mailto:${c.email}`}
+                        className="underline-offset-2 hover:underline"
+                      >
+                        {c.email}
+                      </a>
+                    </td>
+                    <td className="px-4 py-3 text-eoe-espresso/80">
+                      {c.phone || "n/a"}
+                    </td>
+                    <td className="px-4 py-3">{c.booking_count}</td>
+                    <td className="px-4 py-3 text-eoe-espresso/80">
+                      {c.last_visit
+                        ? shortDay(dayKey(String(c.last_visit)))
+                        : "n/a"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- users / roles ----------
+type AdminUserRow = {
+  id: number;
+  username: string;
+  display_name: string;
+  role: AdminRole;
+  is_active: boolean;
+  created_at: string;
+};
+
+function UsersPanel() {
+  const { data, error, isLoading, mutate } = useSWR<{
+    collection: AdminUserRow[];
+  }>("/api/admin/users", fetcher);
+  const users = data?.collection ?? [];
+  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"manager" | "staff">("staff");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const creatable = ADMIN_ROLES.filter((r) => r.id !== "owner");
+
+  const create = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await adminFetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: username.trim(),
+          password,
+          display_name: displayName.trim() || username.trim(),
+          role,
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg(d.detail ?? "Could not create user");
+        return;
+      }
+      setUsername("");
+      setDisplayName("");
+      setPassword("");
+      setRole("staff");
+      setMsg("Account created");
+      await mutate();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setActive = async (id: number, is_active: boolean) => {
+    const res = await adminFetch(`/api/admin/users/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_active }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      setMsg(d.detail ?? "Could not update user");
+      return;
+    }
+    await mutate();
+  };
+
+  const changeRole = async (id: number, next: "manager" | "staff") => {
+    const res = await adminFetch(`/api/admin/users/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: next }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      setMsg(d.detail ?? "Could not update role");
+      return;
+    }
+    await mutate();
+  };
+
+  const remove = async (id: number, name: string) => {
+    if (!confirm(`Remove account “${name}”? They will no longer be able to sign in.`))
+      return;
+    const res = await adminFetch(`/api/admin/users/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      setMsg(d.detail ?? "Could not delete user");
+      return;
+    }
+    await mutate();
+  };
+
+  const inputCls =
+    "min-h-11 w-full rounded-full border border-eoe-espresso/15 bg-white px-4 py-2.5 text-sm text-eoe-espresso outline-none focus:border-eoe-gold";
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-2xl border border-eoe-espresso/12 bg-white p-4 shadow-sm sm:p-5">
+        <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/75">
+          Roles
+        </p>
+        <ul className="mt-3 space-y-2 text-sm text-eoe-espresso/85">
+          {ADMIN_ROLES.map((r) => (
+            <li key={r.id}>
+              <span className="font-medium text-eoe-ink">{r.label}</span>
+              {": "}
+              {r.hint}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-xs leading-relaxed text-eoe-espresso/70">
+          Owner signs in with the env account (ADMIN_USER). Create manager or
+          staff accounts here for day-to-day access.
+        </p>
+      </div>
+
+      <form
+        onSubmit={create}
+        className="rounded-2xl border border-eoe-espresso/12 bg-white p-4 shadow-sm sm:p-5"
+      >
+        <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/75">
+          Add account
+        </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+              Username
+            </span>
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              autoComplete="off"
+              className={inputCls}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+              Display name
+            </span>
+            <input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              className={inputCls}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+              Password
+            </span>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={8}
+              autoComplete="new-password"
+              className={inputCls}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+              Role
+            </span>
+            <select
+              value={role}
+              onChange={(e) =>
+                setRole(e.target.value as "manager" | "staff")
+              }
+              className={inputCls}
+            >
+              {creatable.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            disabled={busy}
+            className="min-h-11 rounded-full bg-eoe-espresso px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-eoe-ivory disabled:opacity-40"
+          >
+            {busy ? "Creating…" : "Create account"}
+          </button>
+          {msg && <span className="text-xs text-eoe-espresso/80">{msg}</span>}
+        </div>
+      </form>
+
+      {isLoading && (
+        <p className="text-sm text-eoe-espresso/85">Loading users…</p>
+      )}
+      {error && (
+        <p className="text-sm text-rose-600">
+          Could not load users. Ensure the admin_users table is migrated.
+        </p>
+      )}
+
+      {users.length > 0 && (
+        <div className="space-y-3 md:hidden">
+          {users.map((u) => (
+            <div
+              key={u.id}
+              className="rounded-2xl border border-eoe-espresso/10 bg-white p-4 shadow-sm"
+            >
+              <p className="font-medium text-eoe-ink">
+                {u.display_name || u.username}
+              </p>
+              <p className="text-xs text-eoe-espresso/70">@{u.username}</p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {u.role === "owner" ? (
+                  <span className="rounded-full bg-eoe-espresso/10 px-3 py-1 text-[10px] uppercase tracking-[0.14em] text-eoe-espresso">
+                    Owner
+                  </span>
+                ) : (
+                  <select
+                    value={u.role}
+                    onChange={(e) =>
+                      void changeRole(
+                        u.id,
+                        e.target.value as "manager" | "staff"
+                      )
+                    }
+                    className="min-h-10 rounded-full border border-eoe-espresso/15 bg-white px-3 text-xs text-eoe-espresso"
+                  >
+                    <option value="manager">Manager</option>
+                    <option value="staff">Staff</option>
+                  </select>
+                )}
+                <span
+                  className={`rounded-full px-3 py-1 text-[10px] uppercase tracking-[0.14em] ${
+                    u.is_active
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-eoe-espresso/10 text-eoe-espresso/70"
+                  }`}
+                >
+                  {u.is_active ? "Active" : "Disabled"}
+                </span>
+              </div>
+              {u.role !== "owner" && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void setActive(u.id, !u.is_active)}
+                    className="min-h-10 rounded-full border border-eoe-espresso/15 px-3 text-[10px] uppercase tracking-[0.14em] text-eoe-espresso"
+                  >
+                    {u.is_active ? "Disable" : "Enable"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void remove(u.id, u.username)}
+                    className="min-h-10 rounded-full border border-rose-200 px-3 text-[10px] uppercase tracking-[0.14em] text-rose-700"
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {users.length > 0 && (
+        <div className="hidden overflow-x-auto rounded-2xl border border-eoe-espresso/10 bg-white shadow-sm md:block">
+          <table className="w-full min-w-[640px] text-left text-sm">
+            <thead className="bg-eoe-ivory text-[10px] uppercase tracking-[0.18em] text-eoe-espresso/70">
+              <tr>
+                <th className="px-4 py-3 font-medium">User</th>
+                <th className="px-4 py-3 font-medium">Role</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr
+                  key={u.id}
+                  className="border-t border-eoe-espresso/8 text-eoe-ink"
+                >
+                  <td className="px-4 py-3">
+                    <div>{u.display_name || u.username}</div>
+                    <div className="text-xs text-eoe-espresso/70">
+                      @{u.username}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {u.role === "owner" ? (
+                      "Owner"
+                    ) : (
+                      <select
+                        value={u.role}
+                        onChange={(e) =>
+                          void changeRole(
+                            u.id,
+                            e.target.value as "manager" | "staff"
+                          )
+                        }
+                        className="rounded-full border border-eoe-espresso/15 bg-white px-3 py-1.5 text-xs"
+                      >
+                        <option value="manager">Manager</option>
+                        <option value="staff">Staff</option>
+                      </select>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {u.is_active ? "Active" : "Disabled"}
+                  </td>
+                  <td className="px-4 py-3">
+                    {u.role !== "owner" && (
+                      <span className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void setActive(u.id, !u.is_active)}
+                          className="text-[11px] uppercase tracking-[0.14em] text-eoe-espresso hover:underline"
+                        >
+                          {u.is_active ? "Disable" : "Enable"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void remove(u.id, u.username)}
+                          className="text-[11px] uppercase tracking-[0.14em] text-rose-700 hover:underline"
+                        >
+                          Remove
+                        </button>
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -496,12 +1626,12 @@ function relTime(iso: string): string {
 function NotificationsBell({
   items,
   unseenCount,
-  onToggleSeen,
+  onOpen,
   onMarkAll,
 }: {
   items: ScheduledEvent[];
   unseenCount: number;
-  onToggleSeen: (uri: string, seen: boolean) => Promise<void>;
+  onOpen: (b: ScheduledEvent) => void | Promise<void>;
   onMarkAll: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -525,7 +1655,7 @@ function NotificationsBell({
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div className="absolute right-0 z-40 mt-2 w-[360px] max-w-[92vw] overflow-hidden rounded-2xl border border-eoe-espresso/12 bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-eoe-espresso/10 px-4 py-3">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-eoe-espresso/60">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-eoe-espresso/80">
                 New bookings
               </p>
               {unseenCount > 0 && (
@@ -540,7 +1670,7 @@ function NotificationsBell({
             </div>
             <div className="max-h-[440px] overflow-y-auto">
               {items.length === 0 && (
-                <p className="px-4 py-8 text-center text-sm text-eoe-espresso/50">
+                <p className="px-4 py-8 text-center text-sm text-eoe-espresso/70">
                   No bookings yet.
                 </p>
               )}
@@ -550,8 +1680,11 @@ function NotificationsBell({
                 return (
                   <button
                     key={b.uri}
-                    onClick={() => onToggleSeen(b.uri, !b.seen)}
-                    title={b.seen ? "Mark unseen" : "Mark seen"}
+                    onClick={() => {
+                      setOpen(false);
+                      void onOpen(b);
+                    }}
+                    title="Open booking"
                     className={`flex w-full items-start gap-3 border-b border-eoe-espresso/[0.06] px-4 py-3 text-left transition hover:bg-eoe-ivory ${
                       b.seen ? "" : "bg-eoe-gold/10"
                     }`}
@@ -567,24 +1700,34 @@ function NotificationsBell({
                       <span
                         className={`block text-sm ${
                           b.seen
-                            ? "text-eoe-espresso/80"
+                            ? "text-eoe-ink"
                             : "font-medium text-eoe-espresso"
                         }`}
                       >
                         {b.invitee.name} · {b.name}
                       </span>
-                      <span className="block text-xs text-eoe-espresso/55">
+                      <span className="block text-xs text-eoe-espresso/75">
                         {day} · {time} · {b.guests}{" "}
                         {b.guests === 1 ? "guest" : "guests"}
+                        {b.cars != null && b.cars > 0
+                          ? ` · ${b.cars} ${b.cars === 1 ? "car" : "cars"}${
+                              b.car_labels?.length
+                                ? ` (${b.car_labels.join(", ")})`
+                                : ""
+                            }`
+                          : ""}
                       </span>
-                      <span className="block text-[11px] text-eoe-espresso/40">
+                      <span className="block text-[11px] text-eoe-espresso/70">
                         {relTime(b.created_at)}
                         {b.status === "canceled" ? " · cancelled" : ""}
                         {b.payment_status === "paid"
                           ? " · paid"
-                          : b.pay_on_arrival
-                          ? " · pays at restaurant"
-                          : ""}
+                          : b.payment_status === "partially_paid"
+                            ? " · partially paid"
+                            : b.pay_on_arrival
+                              ? " · pays at restaurant"
+                              : " · awaiting payment"}
+                        {b.special_request?.trim() ? " · special request" : ""}
                       </span>
                     </span>
                   </button>
@@ -612,7 +1755,7 @@ function NewBookingModal({
   onCreated: () => Promise<void>;
 }) {
   const [sid, setSid] = useState(types[0] ? serviceId(types[0].uri) : "");
-  const [date, setDate] = useState(venueTodayKey());
+  const [date, setDate] = useState(nearestOpenDayKey());
   const [times, setTimes] = useState<
     { start_time: string; invitees_remaining: number }[]
   >([]);
@@ -623,12 +1766,31 @@ function NewBookingModal({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [guests, setGuests] = useState("2");
+  const [carTypes, setCarTypes] = useState<string[]>([]);
+  const [specialRequest, setSpecialRequest] = useState("");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const type = types.find((t) => serviceId(t.uri) === sid);
   const shared = type?.exclusive === false;
+  const needsCars = isCarWashService(type?.slug);
+  const guestCount = Math.max(1, Number(guests) || 1);
+  const washMin = needsCars ? carWashMinimumCents(carTypes) : 0;
+  const priceCents = type?.price_cents ?? 0;
+
+  const resizeTypes = (count: number) => {
+    const n = Math.min(MAX_CARS_PER_SESSION, Math.max(0, count));
+    setCarTypes((prev) => {
+      if (prev.length === n) return prev;
+      if (n === 0) return [];
+      if (prev.length > n) return prev.slice(0, n);
+      return [
+        ...prev,
+        ...Array.from({ length: n - prev.length }, () => "sedan"),
+      ];
+    });
+  };
 
   useEffect(() => {
     if (!sid || !date) return;
@@ -638,7 +1800,7 @@ function NewBookingModal({
       setSlot(null);
       const end = addDaysKey(date, 1);
       try {
-        const r = await fetch(
+        const r = await adminFetch(
           `/api/v1/calendly/event_type_available_times?event_type=${sid}` +
             `&start_time=${date}T00:00:00Z&end_time=${end}T00:00:00Z`
         );
@@ -666,7 +1828,7 @@ function NewBookingModal({
     setError(null);
     const digits = phone.replace(/\D/g, "");
     const fallbackEmail = `guest-${digits || Date.now()}@noemail.local`;
-    const res = await fetch(`/api/v1/calendly/scheduled_events`, {
+    const res = await adminFetch(`/api/v1/calendly/scheduled_events`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -677,7 +1839,9 @@ function NewBookingModal({
           email: email.trim() || fallbackEmail,
           phone: phone || undefined,
         },
-        guests: Math.max(1, Number(guests) || 1),
+        guests: guestCount,
+        ...(needsCars && carTypes.length > 0 ? { car_types: carTypes } : {}),
+        special_request: specialRequest.trim() || undefined,
         notes: notes.trim() || undefined,
       }),
     });
@@ -685,24 +1849,20 @@ function NewBookingModal({
       const b = await res.json().catch(() => ({}));
       setError(
         res.status === 409
-          ? "That slot is full or taken — pick another time."
+          ? "That slot is full or taken. Pick another time."
           : b.detail ?? "Could not create the booking."
       );
       setBusy(false);
       return;
     }
-    // Admin created it themselves — mark it seen so the bell stays quiet.
     const created = await res.json().catch(() => null);
     const uri: string | undefined = created?.resource?.uri;
     if (uri) {
-      await fetch(
-        `/api/v1/calendly/scheduled_events/${bookingId(uri)}?token=${ADMIN_TOKEN}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ seen: true }),
-        }
-      ).catch(() => {});
+      await adminFetch(`/api/v1/calendly/scheduled_events/${bookingId(uri)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seen: true }),
+      }).catch(() => {});
     }
     setBusy(false);
     await onCreated();
@@ -714,28 +1874,27 @@ function NewBookingModal({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-eoe-ink/45 px-4 py-10 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-eoe-ink/45 px-0 py-0 backdrop-blur-sm sm:items-start sm:px-4 sm:py-10"
     >
       <form
         onSubmit={submit}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg rounded-3xl border border-eoe-espresso/10 bg-white p-7 shadow-2xl"
+        className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-eoe-espresso/10 bg-white p-5 shadow-2xl sm:rounded-3xl sm:p-7"
       >
         <div className="flex items-start justify-between">
           <div>
             <h2 className="font-display text-2xl tracking-wide text-eoe-espresso">
               New booking
             </h2>
-            <p className="mt-1 text-xs leading-relaxed text-eoe-espresso/55">
-              For guests booking by phone or message. No payment is taken —
-              the booking is created as awaiting payment and the guest settles
-              on arrival.
+            <p className="mt-1 text-xs leading-relaxed text-eoe-espresso/75">
+              For guests booking by phone or message. No online payment;
+              marked as pays at restaurant.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full px-2 text-lg leading-none text-eoe-espresso/40 hover:text-eoe-espresso"
+            className="rounded-full px-2 text-lg leading-none text-eoe-espresso/70 hover:text-eoe-espresso"
             aria-label="Close"
           >
             ×
@@ -744,10 +1903,17 @@ function NewBookingModal({
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <label className="block sm:col-span-2">
-            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/75">
               Experience
             </span>
-            <select value={sid} onChange={(e) => setSid(e.target.value)} className={inputCls}>
+            <select
+              value={sid}
+              onChange={(e) => {
+                setSid(e.target.value);
+                setCarTypes([]);
+              }}
+              className={inputCls}
+            >
               {types.map((t) => (
                 <option key={t.uri} value={serviceId(t.uri)}>
                   {t.name}
@@ -756,18 +1922,21 @@ function NewBookingModal({
             </select>
           </label>
           <label className="block">
-            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
-              Date
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/75">
+              Date (Fri to Sun)
             </span>
             <input
               type="date"
               value={date}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setDate(isOpenDayKey(next) ? next : nearestOpenDayKey(next));
+              }}
               className={inputCls}
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/75">
               Guests
             </span>
             <input
@@ -778,18 +1947,75 @@ function NewBookingModal({
               className={inputCls}
             />
           </label>
+          {needsCars && (
+            <>
+              <label className="block sm:col-span-2">
+                <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/75">
+                  Cars to wash (optional, max {MAX_CARS_PER_SESSION})
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  max={MAX_CARS_PER_SESSION}
+                  value={carTypes.length}
+                  onChange={(e) =>
+                    resizeTypes(Math.trunc(Number(e.target.value)) || 0)
+                  }
+                  className={inputCls}
+                />
+              </label>
+              {carTypes.map((id, i) => (
+                <label key={i} className="block sm:col-span-2">
+                  <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/75">
+                    Car {i + 1} type
+                  </span>
+                  <select
+                    value={id}
+                    onChange={(e) =>
+                      setCarTypes((prev) =>
+                        prev.map((t, idx) => (idx === i ? e.target.value : t))
+                      )
+                    }
+                    className={inputCls}
+                  >
+                    {CAR_TYPES.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.label} (from {money(o.min_cents)})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+              {carTypes.length === 0 && (
+                <p className="sm:col-span-2 text-[11px] text-eoe-espresso/70">
+                  No car wash yet. You can add cars later from the booking
+                  details; any balance is settled on arrival.
+                </p>
+              )}
+            </>
+          )}
         </div>
 
+        {needsCars && priceCents > 0 && (
+          <p className="mt-3 rounded-xl bg-eoe-ivory px-3 py-2 text-[11px] leading-relaxed text-eoe-espresso/80">
+            Guide only (settled at restaurant): {money(priceCents)} ×{" "}
+            {guestCount} guests
+            {washMin > 0 ? ` + ${money(washMin)} car wash minimum` : ""}
+            {` = ${money(priceCents * guestCount + washMin)}`}. No online
+            charge for manual bookings.
+          </p>
+        )}
+
         <div className="mt-4">
-          <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+          <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/75">
             Time
           </span>
           <div className="flex flex-wrap gap-2">
             {timesLoading && (
-              <p className="text-xs text-eoe-espresso/50">Loading…</p>
+              <p className="text-xs text-eoe-espresso/70">Loading…</p>
             )}
             {!timesLoading && times.length === 0 && (
-              <p className="text-xs text-eoe-espresso/50">
+              <p className="text-xs text-eoe-espresso/70">
                 Closed / no open times on this day.
               </p>
             )}
@@ -810,7 +2036,7 @@ function NewBookingModal({
                     className={`text-[10px] ${
                       slot === t.start_time
                         ? "text-eoe-ivory/70"
-                        : "text-eoe-espresso/45"
+                        : "text-eoe-espresso/70"
                     }`}
                   >
                     {t.invitees_remaining} seats
@@ -823,7 +2049,7 @@ function NewBookingModal({
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="block sm:col-span-2">
-            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/75">
               Guest name
             </span>
             <input
@@ -834,7 +2060,7 @@ function NewBookingModal({
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/75">
               Phone
             </span>
             <input
@@ -845,7 +2071,7 @@ function NewBookingModal({
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/75">
               Email (optional)
             </span>
             <input
@@ -856,8 +2082,21 @@ function NewBookingModal({
             />
           </label>
           <label className="block sm:col-span-2">
-            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
-              Notes (optional)
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/75">
+              Special request (optional)
+            </span>
+            <textarea
+              value={specialRequest}
+              onChange={(e) => setSpecialRequest(e.target.value)}
+              rows={2}
+              maxLength={500}
+              placeholder="Anniversary, birthday, flowers, proposal…"
+              className="w-full rounded-2xl border border-eoe-espresso/15 bg-white px-3.5 py-2 text-sm text-eoe-espresso outline-none focus:border-eoe-gold"
+            />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="mb-1 block text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/75">
+              Internal notes (optional)
             </span>
             <textarea
               value={notes}
@@ -902,17 +2141,17 @@ function SeatSettings({
 }) {
   const shared = services.filter((s) => s.exclusive === false);
   return (
-    <section className="mt-6 rounded-2xl border border-eoe-espresso/12 bg-white px-5 py-4 shadow-sm">
-      <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/55">
+    <section className="rounded-2xl border border-eoe-espresso/12 bg-white px-5 py-4 shadow-sm">
+      <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/75">
         Seats per time slot
       </p>
-      <p className="mt-1 max-w-xl text-xs leading-relaxed text-eoe-espresso/55">
+      <p className="mt-1 max-w-xl text-xs leading-relaxed text-eoe-espresso/75">
         How many guests can book the same café slot before it shows as full.
         Events stay one booking per slot and aren&apos;t listed here.
       </p>
       <div className="mt-4 space-y-3">
         {shared.length === 0 && (
-          <p className="text-sm text-eoe-espresso/50">
+          <p className="text-sm text-eoe-espresso/70">
             No shared experiences yet.
           </p>
         )}
@@ -938,7 +2177,7 @@ type SlotUsage = {
 // specific slot's capacity (e.g. extra tables for one sitting).
 function PerSlotSeats({ services }: { services: EventType[] }) {
   const [sid, setSid] = useState("");
-  const [date, setDate] = useState(venueTodayKey());
+  const [date, setDate] = useState(() => nearestOpenDayKey());
   const [slots, setSlots] = useState<SlotUsage[]>([]);
   const [loading, setLoading] = useState(false);
   const activeSid = sid || (services[0] ? serviceId(services[0].uri) : "");
@@ -947,8 +2186,8 @@ function PerSlotSeats({ services }: { services: EventType[] }) {
     if (!activeSid || !date) return;
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/v1/calendly/admin/slots?event_type=${activeSid}&date=${date}&token=${ADMIN_TOKEN}`
+      const res = await adminFetch(
+        `/api/v1/calendly/admin/slots?event_type=${activeSid}&date=${date}`
       );
       const d = res.ok ? await res.json() : { collection: [] };
       setSlots(d.collection ?? []);
@@ -963,10 +2202,23 @@ function PerSlotSeats({ services }: { services: EventType[] }) {
     load();
   }, [load]);
 
+  const onDateChange = (raw: string) => {
+    if (!raw) return;
+    if (isOpenDayKey(raw)) {
+      setDate(raw);
+      return;
+    }
+    // Snap to the next open day (Fri / Sat / Sun).
+    setDate(nearestOpenDayKey(raw));
+  };
+
   return (
     <div className="mt-5 border-t border-eoe-espresso/10 pt-5">
-      <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/55">
+      <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/75">
         Seats on a specific day
+      </p>
+      <p className="mt-1 text-xs text-eoe-espresso/70">
+        Only Friday, Saturday and Sunday are open.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <select
@@ -983,14 +2235,17 @@ function PerSlotSeats({ services }: { services: EventType[] }) {
         <input
           type="date"
           value={date}
-          onChange={(e) => setDate(e.target.value)}
+          onChange={(e) => onDateChange(e.target.value)}
+          onBlur={() => {
+            if (!isOpenDayKey(date)) setDate(nearestOpenDayKey(date));
+          }}
           className="rounded-full border border-eoe-espresso/15 bg-white px-3 py-1.5 text-sm text-eoe-espresso outline-none focus:border-eoe-gold"
         />
       </div>
       <div className="mt-3 space-y-2">
-        {loading && <p className="text-xs text-eoe-espresso/50">Loading…</p>}
+        {loading && <p className="text-xs text-eoe-espresso/70">Loading…</p>}
         {!loading && slots.length === 0 && (
-          <p className="text-xs text-eoe-espresso/50">
+          <p className="text-xs text-eoe-espresso/70">
             Closed / no slots on this day.
           </p>
         )}
@@ -1024,7 +2279,7 @@ function SlotSeatRow({
   const patch = async (bodyExtra: object) => {
     setBusy(true);
     try {
-      await fetch(`/api/v1/calendly/admin/slots?token=${ADMIN_TOKEN}`, {
+      await adminFetch(`/api/v1/calendly/admin/slots`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1044,7 +2299,7 @@ function SlotSeatRow({
       <span className="w-14 font-display text-base text-eoe-espresso">
         {timeOf(slot.start_time)}
       </span>
-      <span className="text-xs text-eoe-espresso/55">
+      <span className="text-xs text-eoe-espresso/75">
         {slot.booked} booked of {slot.capacity}
       </span>
       <span className="ml-auto flex items-center gap-2">
@@ -1055,7 +2310,7 @@ function SlotSeatRow({
           onChange={(e) => setValue(e.target.value)}
           className="w-20 rounded-full border border-eoe-espresso/15 bg-white px-3 py-1 text-sm text-eoe-espresso outline-none focus:border-eoe-gold"
         />
-        <span className="text-[11px] text-eoe-espresso/45">seats left</span>
+        <span className="text-[11px] text-eoe-espresso/70">seats left</span>
         <button
           onClick={() => patch({ seats_left: Number(value) })}
           disabled={busy || !dirty || Number(value) < 0}
@@ -1067,7 +2322,7 @@ function SlotSeatRow({
           <button
             onClick={() => patch({ reset: true })}
             disabled={busy}
-            className="text-[10px] uppercase tracking-[0.16em] text-eoe-espresso/50 hover:text-eoe-espresso"
+            className="text-[10px] uppercase tracking-[0.16em] text-eoe-espresso/70 hover:text-eoe-espresso"
           >
             Reset
           </button>
@@ -1091,8 +2346,8 @@ function SeatRow({ s, onSaved }: { s: EventType; onSaved: () => void }) {
     }
     setBusy(true);
     setMsg(null);
-    const res = await fetch(
-      `/api/v1/calendly/event_types/${serviceId(s.uri)}?token=${ADMIN_TOKEN}`,
+    const res = await adminFetch(
+      `/api/v1/calendly/event_types/${serviceId(s.uri)}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -1126,7 +2381,7 @@ function SeatRow({ s, onSaved }: { s: EventType; onSaved: () => void }) {
         onChange={(e) => setValue(e.target.value)}
         className="w-24 rounded-full border border-eoe-espresso/15 bg-white px-3 py-1.5 text-sm text-eoe-espresso outline-none focus:border-eoe-gold"
       />
-      <span className="text-xs text-eoe-espresso/50">seats / slot</span>
+      <span className="text-xs text-eoe-espresso/70">seats / slot</span>
       <button
         onClick={save}
         disabled={busy || !dirty}
@@ -1134,7 +2389,7 @@ function SeatRow({ s, onSaved }: { s: EventType; onSaved: () => void }) {
       >
         {busy ? "Saving…" : "Save"}
       </button>
-      {msg && <span className="text-[11px] text-eoe-espresso/60">{msg}</span>}
+      {msg && <span className="text-[11px] text-eoe-espresso/80">{msg}</span>}
     </div>
   );
 }
@@ -1144,10 +2399,12 @@ function Kpi({
   label,
   value,
   tone,
+  onClick,
 }: {
   label: string;
   value: number | string;
   tone?: "primary" | "warn" | "muted";
+  onClick?: () => void;
 }) {
   const cardCls =
     tone === "primary"
@@ -1158,18 +2415,31 @@ function Kpi({
     tone === "warn"
       ? "text-amber-600"
       : tone === "muted"
-      ? "text-eoe-espresso/40"
-      : "text-eoe-espresso";
-  return (
-    <div className={`rounded-2xl border px-5 py-4 shadow-sm ${cardCls}`}>
-      <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/55">
+        ? "text-eoe-espresso/80"
+        : "text-eoe-ink";
+  const shared = `rounded-2xl border px-5 py-4 text-left shadow-sm ${cardCls} ${
+    onClick
+      ? "cursor-pointer transition hover:border-eoe-espresso/25 hover:shadow-md"
+      : ""
+  }`;
+  const body = (
+    <>
+      <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/75">
         {label}
       </p>
       <p className={`mt-2 font-display text-3xl ${valueCls}`} style={valueStyle}>
         {value}
       </p>
-    </div>
+    </>
   );
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={shared}>
+        {body}
+      </button>
+    );
+  }
+  return <div className={shared}>{body}</div>;
 }
 
 // ---------- 14-day load strip ----------
@@ -1186,10 +2456,10 @@ function LoadStrip({
   return (
     <section className="mt-4 rounded-2xl border border-eoe-espresso/10 bg-white px-5 py-4 shadow-sm">
       <div className="flex items-center justify-between">
-        <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/55">
+        <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/75">
           Next 14 days
         </p>
-        <p className="text-[11px] text-eoe-espresso/40">bookings per day</p>
+        <p className="text-[11px] text-eoe-espresso/70">bookings per day</p>
       </div>
       <div className="relative mt-4 flex items-end gap-1.5" style={{ height: 72 }}>
         {days.map((d, i) => {
@@ -1212,13 +2482,13 @@ function LoadStrip({
                 className="w-full rounded-md transition-opacity"
                 style={{
                   height: h,
-                  backgroundColor: d.count === 0 ? "rgba(154,101,82,0.08)" : GOLD,
+                  backgroundColor: d.count === 0 ? "rgba(122,79,63,0.12)" : GOLD,
                   opacity: hover === null || hover === i ? 1 : 0.55,
                 }}
               />
               <span
                 className={`mt-1.5 text-[10px] ${
-                  isToday ? "font-semibold" : "text-eoe-espresso/40"
+                  isToday ? "font-semibold" : "text-eoe-espresso/70"
                 }`}
                 style={isToday ? { color: GOLD_TEXT } : undefined}
               >
@@ -1243,15 +2513,16 @@ function Segmented<T extends string>({
   options: [T, string][];
 }) {
   return (
-    <div className="flex flex-wrap rounded-full border border-eoe-espresso/15 bg-white p-1 text-[11px] uppercase tracking-[0.16em]">
+    <div className="inline-flex max-w-full flex-nowrap rounded-full border border-eoe-espresso/15 bg-white p-1 text-[11px] uppercase tracking-[0.14em] sm:tracking-[0.16em]">
       {options.map(([v, label]) => (
         <button
           key={v}
+          type="button"
           onClick={() => onChange(v)}
-          className={`rounded-full px-3.5 py-1.5 font-semibold transition ${
+          className={`min-h-10 shrink-0 rounded-full px-3 py-2 font-semibold transition sm:px-3.5 ${
             value === v
               ? "bg-eoe-gold text-eoe-ivory"
-              : "font-normal text-eoe-espresso/60 hover:text-eoe-espresso"
+              : "font-normal text-eoe-espresso/80 hover:text-eoe-espresso"
           }`}
         >
           {label}
@@ -1263,15 +2534,16 @@ function Segmented<T extends string>({
 
 function Toggle({ value, onChange }: { value: View; onChange: (v: View) => void }) {
   return (
-    <div className="flex rounded-full border border-eoe-espresso/15 bg-white p-1 text-[11px] uppercase tracking-[0.16em]">
+    <div className="inline-flex rounded-full border border-eoe-espresso/15 bg-white p-1 text-[11px] uppercase tracking-[0.16em]">
       {(["agenda", "table"] as View[]).map((v) => (
         <button
           key={v}
+          type="button"
           onClick={() => onChange(v)}
-          className={`rounded-full px-3.5 py-1.5 font-semibold transition ${
+          className={`min-h-10 rounded-full px-3.5 py-2 font-semibold transition ${
             value === v
               ? "bg-eoe-gold text-eoe-ivory"
-              : "font-normal text-eoe-espresso/60 hover:text-eoe-espresso"
+              : "font-normal text-eoe-espresso/80 hover:text-eoe-espresso"
           }`}
         >
           {v}
@@ -1282,15 +2554,66 @@ function Toggle({ value, onChange }: { value: View; onChange: (v: View) => void 
 }
 
 // ---------- status badge ----------
+function isAwaitingHold(b: ScheduledEvent) {
+  return (
+    b.status !== "canceled" &&
+    b.payment_status === "unpaid" &&
+    !b.pay_on_arrival
+  );
+}
+
+function heldMinutes(iso: string): number {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return 0;
+  return Math.max(0, Math.floor((Date.now() - t) / 60000));
+}
+
+function heldAgeLabel(iso: string): string {
+  const m = heldMinutes(iso);
+  if (m < 1) return "Held just now";
+  if (m < 60) return `Held ${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `Held ${h}h`;
+  return `Held ${Math.floor(h / 24)}d`;
+}
+
 function statusOf(b: ScheduledEvent) {
   if (b.status === "canceled")
-    return { label: "Cancelled", cls: "bg-eoe-espresso/8 text-eoe-espresso/50" };
+    return {
+      label: "Cancelled",
+      cls: "bg-eoe-espresso/8 text-eoe-espresso/70",
+      age: null as string | null,
+      stale: false,
+    };
+  if (b.payment_status === "partially_paid")
+    return {
+      label: "Partially paid",
+      cls: "bg-orange-100 text-orange-800",
+      age: null as string | null,
+      stale: false,
+    };
   if (b.payment_status === "paid")
-    return { label: "Paid", cls: "bg-emerald-100 text-emerald-700" };
+    return {
+      label: "Paid",
+      cls: "bg-emerald-100 text-emerald-700",
+      age: null as string | null,
+      stale: false,
+    };
   // Manual (phone/walk-in) bookings: no online checkout, settled at the venue.
   if (b.pay_on_arrival)
-    return { label: "Pays at restaurant", cls: "bg-sky-100 text-sky-700" };
-  return { label: "Awaiting payment", cls: "bg-amber-100 text-amber-700" };
+    return {
+      label: "Pays at restaurant",
+      cls: "bg-sky-100 text-sky-700",
+      age: null as string | null,
+      stale: false,
+    };
+  const stale = heldMinutes(b.created_at) >= 30;
+  return {
+    label: "Awaiting payment",
+    cls: stale ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700",
+    age: heldAgeLabel(b.created_at),
+    stale,
+  };
 }
 
 // ---------- agenda card ----------
@@ -1298,40 +2621,22 @@ function BookingCard({
   b,
   color,
   shared,
+  onOpen,
   onCancel,
   onReschedule,
-  onEditGuests,
 }: {
   b: ScheduledEvent;
   color: string;
   shared: boolean;
+  onOpen: () => void;
   onCancel: (uri: string) => Promise<void>;
   onReschedule: (uri: string, startIso: string) => Promise<string | null>;
-  onEditGuests: (uri: string, guests: number) => Promise<string | null>;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [rescheduling, setRescheduling] = useState(false);
-  const [editingGuests, setEditingGuests] = useState(false);
-  const [guestVal, setGuestVal] = useState(String(b.guests));
-  const [guestBusy, setGuestBusy] = useState(false);
-  const [guestErr, setGuestErr] = useState<string | null>(null);
   const st = statusOf(b);
   const cancelled = b.status === "canceled";
-
-  const saveGuests = async () => {
-    const n = Number(guestVal);
-    if (!Number.isInteger(n) || n < 1) {
-      setGuestErr("Enter a whole number ≥ 1");
-      return;
-    }
-    setGuestBusy(true);
-    setGuestErr(null);
-    const err = await onEditGuests(b.uri, n);
-    setGuestBusy(false);
-    if (err) setGuestErr(err);
-    else setEditingGuests(false);
-  };
 
   const doCancel = async () => {
     setBusy(true);
@@ -1352,77 +2657,59 @@ function BookingCard({
       } px-5 py-4`}
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex gap-4">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="flex min-w-0 flex-1 gap-4 rounded-xl text-left transition hover:bg-eoe-ivory/70"
+        >
           <div className="w-14 shrink-0 text-center">
             <p className="font-display text-lg text-eoe-espresso">
               {timeOf(b.start_time)}
             </p>
-            <p className="text-[10px] text-eoe-espresso/45">
+            <p className="text-[10px] text-eoe-espresso/70">
               {timeOf(b.end_time)}
             </p>
           </div>
-          <div>
-            <p className="flex items-center gap-2 font-medium text-eoe-espresso">
+          <div className="min-w-0 py-0.5">
+            <p className="flex flex-wrap items-center gap-2 font-medium text-eoe-espresso">
               <span
                 className="inline-block h-2.5 w-2.5 rounded-full"
                 style={{ backgroundColor: color }}
               />
               {b.name}
-              {editingGuests && !cancelled ? (
-                <span className="ml-1 inline-flex items-center gap-1.5">
-                  <input
-                    type="number"
-                    min={1}
-                    value={guestVal}
-                    onChange={(e) => setGuestVal(e.target.value)}
-                    className="w-16 rounded-full border border-eoe-espresso/20 bg-white px-2 py-0.5 text-xs text-eoe-espresso outline-none focus:border-eoe-gold"
-                  />
-                  <button
-                    onClick={saveGuests}
-                    disabled={guestBusy}
-                    className="rounded-full bg-eoe-espresso px-2.5 py-0.5 text-[10px] uppercase tracking-wide text-eoe-ivory disabled:opacity-40"
-                  >
-                    {guestBusy ? "…" : "Save"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setEditingGuests(false);
-                      setGuestVal(String(b.guests));
-                      setGuestErr(null);
-                    }}
-                    className="text-[10px] uppercase tracking-wide text-eoe-espresso/50 hover:text-eoe-espresso"
-                  >
-                    Cancel
-                  </button>
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => !cancelled && setEditingGuests(true)}
-                  className="text-xs font-normal text-eoe-espresso/50 hover:text-eoe-espresso"
-                >
-                  · {b.guests} {b.guests === 1 ? "guest" : "guests"}
-                  {!cancelled && " ✎"}
-                </button>
-              )}
+              <span className="text-xs font-normal text-eoe-espresso/70">
+                · {b.guests} {b.guests === 1 ? "guest" : "guests"}
+                {b.cars != null && b.cars > 0
+                  ? ` · ${b.cars} ${b.cars === 1 ? "car" : "cars"}${
+                      b.car_labels?.length
+                        ? ` (${b.car_labels.join(", ")})`
+                        : ""
+                    }`
+                  : ""}
+              </span>
             </p>
-            {guestErr && (
-              <p className="mt-1 text-[11px] text-rose-600">{guestErr}</p>
-            )}
-            <p className="mt-1 text-sm text-eoe-espresso/80">{b.invitee.name}</p>
-            <p className="text-xs text-eoe-espresso/55">
+            <p className="mt-1 text-sm text-eoe-ink">{b.invitee.name}</p>
+            <p className="text-xs text-eoe-espresso/75">
               {displayEmail(b.invitee.email)}
               {b.invitee.phone
                 ? `${displayEmail(b.invitee.email) ? " · " : ""}${b.invitee.phone}`
                 : ""}
             </p>
             {b.notes && (
-              <p className="mt-2 max-w-xl whitespace-pre-line rounded-lg bg-eoe-ivory px-3 py-2 text-xs text-eoe-espresso/70">
+              <p className="mt-2 max-w-xl whitespace-pre-line rounded-lg bg-eoe-ivory px-3 py-2 text-xs text-eoe-espresso/85">
                 {b.notes}
               </p>
             )}
+            {b.special_request?.trim() && (
+              <div className="mt-2 max-w-xl">
+                <SpecialRequestBanner text={b.special_request} />
+              </div>
+            )}
+            <p className="mt-2 text-[10px] uppercase tracking-[0.16em] text-eoe-espresso/60">
+              Tap to edit guests, cars, and contact
+            </p>
           </div>
-        </div>
+        </button>
 
         <div className="flex flex-col items-end gap-2 text-xs">
           <span
@@ -1430,9 +2717,20 @@ function BookingCard({
           >
             {st.label}
           </span>
-          {b.payment_status === "paid" && (
-            <span className="text-eoe-espresso/55">
+          {st.age && (
+            <span
+              className={
+                st.stale ? "font-medium text-rose-600" : "text-eoe-espresso/75"
+              }
+            >
+              {st.age}
+            </span>
+          )}
+          {(b.payment_status === "paid" ||
+            b.payment_status === "partially_paid") && (
+            <span className="text-eoe-espresso/75">
               {money(b.payment_amount_cents)} deposit
+              {b.payment_status === "partially_paid" ? " (balance due)" : ""}
             </span>
           )}
           {!cancelled &&
@@ -1447,22 +2745,28 @@ function BookingCard({
                 </button>
                 <button
                   onClick={() => setConfirming(false)}
-                  className="text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/50 hover:text-eoe-espresso"
+                  className="text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/70 hover:text-eoe-espresso"
                 >
                   Keep
                 </button>
               </span>
             ) : (
-              <span className="flex items-center gap-2">
+              <span className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  onClick={onOpen}
+                  className="rounded-full border border-eoe-espresso/20 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/85 hover:bg-eoe-espresso/5"
+                >
+                  Edit
+                </button>
                 <button
                   onClick={() => setRescheduling((v) => !v)}
-                  className="rounded-full border border-eoe-espresso/20 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/70 hover:bg-eoe-espresso/5"
+                  className="rounded-full border border-eoe-espresso/20 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/85 hover:bg-eoe-espresso/5"
                 >
                   {rescheduling ? "Close" : "Reschedule"}
                 </button>
                 <button
                   onClick={() => setConfirming(true)}
-                  className="rounded-full border border-eoe-espresso/20 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/70 hover:bg-eoe-espresso/5"
+                  className="rounded-full border border-eoe-espresso/20 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/85 hover:bg-eoe-espresso/5"
                 >
                   Cancel
                 </button>
@@ -1513,7 +2817,7 @@ function RescheduleControl({
       setError(null);
       const end = addDaysKey(date, 1);
       try {
-        const r = await fetch(
+        const r = await adminFetch(
           `/api/v1/calendly/event_type_available_times?event_type=${sid}` +
             `&start_time=${date}T00:00:00Z&end_time=${end}T00:00:00Z`
         );
@@ -1543,7 +2847,7 @@ function RescheduleControl({
   return (
     <div className="mt-4 rounded-xl border border-eoe-espresso/10 bg-eoe-ivory/60 p-4">
       <div className="flex flex-wrap items-center gap-3">
-        <span className="text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/55">
+        <span className="text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/75">
           Move to
         </span>
         <input
@@ -1555,9 +2859,9 @@ function RescheduleControl({
         />
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
-        {loading && <p className="text-xs text-eoe-espresso/50">Loading…</p>}
+        {loading && <p className="text-xs text-eoe-espresso/70">Loading…</p>}
         {!loading && times.length === 0 && (
-          <p className="text-xs text-eoe-espresso/50">
+          <p className="text-xs text-eoe-espresso/70">
             No open times on this day.
           </p>
         )}
@@ -1570,7 +2874,7 @@ function RescheduleControl({
           >
             {timeOf(t.start_time)}
             {shared && (
-              <span className="text-[10px] text-eoe-espresso/45">
+              <span className="text-[10px] text-eoe-espresso/70">
                 {t.invitees_remaining} seats
               </span>
             )}
@@ -1582,27 +2886,132 @@ function RescheduleControl({
   );
 }
 
+// ---------- payments ----------
+function PaymentsTable({
+  rows,
+  colorFor,
+  onOpenDetail,
+}: {
+  rows: ScheduledEvent[];
+  colorFor: (uri: string) => string;
+  onOpenDetail: (uri: string) => void;
+}) {
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-2xl border border-dashed border-eoe-espresso/15 bg-white/60 px-6 py-12 text-center text-sm text-eoe-espresso/80">
+        No payments match this filter.
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-eoe-espresso/10 bg-white shadow-sm">
+      <table className="w-full min-w-[720px] text-left text-sm">
+        <thead className="bg-eoe-ivory text-[10px] uppercase tracking-[0.18em] text-eoe-espresso/70">
+          <tr>
+            <th className="px-4 py-3 font-medium">When</th>
+            <th className="px-4 py-3 font-medium">Guest</th>
+            <th className="px-4 py-3 font-medium">Experience</th>
+            <th className="px-4 py-3 font-medium">Amount</th>
+            <th className="px-4 py-3 font-medium">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((b) => {
+            const st = statusOf(b);
+            return (
+              <tr
+                key={b.uri}
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpenDetail(b.uri)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onOpenDetail(b.uri);
+                  }
+                }}
+                className="cursor-pointer border-t border-eoe-espresso/8 text-eoe-ink transition hover:bg-eoe-ivory/80"
+              >
+                <td className="whitespace-nowrap px-4 py-3">
+                  <div>{shortDay(dayKey(b.start_time))}</div>
+                  <div className="text-xs text-eoe-espresso/70">
+                    {timeOf(b.start_time)}
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <div>{b.invitee.name}</div>
+                  <div className="text-xs text-eoe-espresso/70">
+                    {displayEmail(b.invitee.email) || b.invitee.phone || ""}
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <span className="flex items-center gap-2">
+                    <span
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: colorFor(b.event_type) }}
+                    />
+                    {b.name}
+                  </span>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3">
+                  {b.payment_status === "paid" ||
+                  b.payment_status === "partially_paid"
+                    ? money(b.payment_amount_cents)
+                    : b.pay_on_arrival
+                      ? "At restaurant"
+                      : "Unpaid"}
+                  {b.payment_status === "partially_paid" && (
+                    <span className="mt-0.5 block text-[11px] text-orange-700">
+                      Balance on arrival
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${st.cls}`}
+                  >
+                    {st.label}
+                  </span>
+                  {st.age && (
+                    <span
+                      className={`mt-1 block text-[11px] ${
+                        st.stale
+                          ? "font-medium text-rose-600"
+                          : "text-eoe-espresso/70"
+                      }`}
+                    >
+                      {st.age}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ---------- table ----------
 function TableView({
   rows,
   colorFor,
   today,
-  sharedFor,
-  onCancel,
-  onReschedule,
+  activeUri,
+  onOpenDetail,
 }: {
   rows: ScheduledEvent[];
   colorFor: (uri: string) => string;
   today: string;
-  sharedFor: (evUri: string) => boolean;
-  onCancel: (uri: string) => Promise<void>;
-  onReschedule: (uri: string, startIso: string) => Promise<string | null>;
+  activeUri: string | null;
+  onOpenDetail: (uri: string) => void;
 }) {
-  const [rescheduleUri, setRescheduleUri] = useState<string | null>(null);
   return (
     <div className="mt-4 overflow-x-auto rounded-2xl border border-eoe-espresso/10 bg-white shadow-sm">
       <table className="w-full min-w-[720px] text-left text-sm">
-        <thead className="bg-eoe-ivory text-[10px] uppercase tracking-[0.18em] text-eoe-espresso/50">
+        <thead className="bg-eoe-ivory text-[10px] uppercase tracking-[0.18em] text-eoe-espresso/70">
           <tr>
             <th className="px-4 py-3 font-medium">Date</th>
             <th className="px-4 py-3 font-medium">Time</th>
@@ -1618,17 +3027,28 @@ function TableView({
           {rows.map((b) => {
             const st = statusOf(b);
             const cancelled = b.status === "canceled";
-            const open = rescheduleUri === b.uri;
             return (
-              <Fragment key={b.uri}>
               <tr
-                className={`border-t border-eoe-espresso/8 ${
-                  cancelled ? "text-eoe-espresso/45" : "text-eoe-espresso/85"
-                }`}
+                key={b.uri}
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpenDetail(b.uri)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onOpenDetail(b.uri);
+                  }
+                }}
+                className={`cursor-pointer border-t border-eoe-espresso/8 transition hover:bg-eoe-ivory/80 ${
+                  cancelled ? "text-eoe-espresso/70" : "text-eoe-ink"
+                } ${activeUri === b.uri ? "bg-eoe-gold/10" : ""}`}
               >
                 <td className="whitespace-nowrap px-4 py-3">
                   {dayKey(b.start_time) === today ? (
-                    <span className="font-semibold" style={{ color: GOLD_TEXT }}>
+                    <span
+                      className="font-semibold"
+                      style={{ color: GOLD_TEXT }}
+                    >
                       Today
                     </span>
                   ) : (
@@ -1649,17 +3069,31 @@ function TableView({
                 </td>
                 <td className="px-4 py-3">
                   <div>{b.invitee.name}</div>
-                  <div className="text-xs text-eoe-espresso/45">
-                    {displayEmail(b.invitee.email) || b.invitee.phone || ""}
+                  <div className="text-xs text-eoe-espresso/70">
+                    {displayEmail(b.invitee.email) ||
+                      b.invitee.phone ||
+                      "Tap to edit"}
                   </div>
+                  <SpecialRequestBanner text={b.special_request} compact />
                 </td>
-                <td className="px-4 py-3">{b.guests}</td>
+                <td className="px-4 py-3">
+                  {b.guests}
+                  {b.cars != null && b.cars > 0 ? (
+                    <span className="block text-[11px] text-eoe-espresso/70">
+                      {b.cars} {b.cars === 1 ? "car" : "cars"}
+                      {b.car_labels?.length
+                        ? ` · ${b.car_labels.join(", ")}`
+                        : ""}
+                    </span>
+                  ) : null}
+                </td>
                 <td className="whitespace-nowrap px-4 py-3">
-                  {b.payment_status === "paid"
+                  {b.payment_status === "paid" ||
+                  b.payment_status === "partially_paid"
                     ? money(b.payment_amount_cents)
                     : b.pay_on_arrival
-                    ? "At restaurant"
-                    : "—"}
+                      ? "At restaurant"
+                      : "n/a"}
                 </td>
                 <td className="px-4 py-3">
                   <span
@@ -1667,36 +3101,24 @@ function TableView({
                   >
                     {st.label}
                   </span>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {!cancelled && (
-                    <span className="flex justify-end gap-3 whitespace-nowrap">
-                      <button
-                        onClick={() =>
-                          setRescheduleUri(open ? null : b.uri)
-                        }
-                        className="text-[11px] uppercase tracking-[0.14em] text-eoe-espresso/50 hover:text-eoe-espresso"
-                      >
-                        {open ? "Close" : "Reschedule"}
-                      </button>
-                      <RowCancel uri={b.uri} onCancel={onCancel} />
+                  {st.age && (
+                    <span
+                      className={`mt-1 block text-[11px] ${
+                        st.stale
+                          ? "font-medium text-rose-600"
+                          : "text-eoe-espresso/70"
+                      }`}
+                    >
+                      {st.age}
                     </span>
                   )}
                 </td>
+                <td className="whitespace-nowrap px-4 py-3 text-right">
+                  <span className="text-[11px] uppercase tracking-[0.14em] text-eoe-espresso/70">
+                    Edit
+                  </span>
+                </td>
               </tr>
-              {open && !cancelled && (
-                <tr className="bg-eoe-ivory/50">
-                  <td colSpan={8} className="px-4 pb-3">
-                    <RescheduleControl
-                      b={b}
-                      shared={sharedFor(b.event_type)}
-                      onReschedule={onReschedule}
-                      onDone={() => setRescheduleUri(null)}
-                    />
-                  </td>
-                </tr>
-              )}
-              </Fragment>
             );
           })}
         </tbody>
@@ -1705,47 +3127,621 @@ function TableView({
   );
 }
 
-function RowCancel({
-  uri,
+function BookingDetailModal({
+  b,
+  color,
+  shared,
+  allowsCars,
+  onClose,
   onCancel,
+  onReschedule,
+  onEditGuests,
+  onEditCars,
+  onEditSpecialRequest,
+  onReleaseHold,
+  onSettlePayment,
 }: {
-  uri: string;
+  b: ScheduledEvent;
+  color: string;
+  shared: boolean;
+  allowsCars: boolean;
+  onClose: () => void;
   onCancel: (uri: string) => Promise<void>;
+  onReschedule: (uri: string, startIso: string) => Promise<string | null>;
+  onEditGuests: (uri: string, guests: number) => Promise<string | null>;
+  onEditCars: (uri: string, carTypes: string[] | null) => Promise<string | null>;
+  onEditSpecialRequest: (
+    uri: string,
+    specialRequest: string | null
+  ) => Promise<string | null>;
+  onReleaseHold: (uri: string) => Promise<string | null>;
+  onSettlePayment: (uri: string) => Promise<string | null>;
 }) {
+  const st = statusOf(b);
+  const cancelled = b.status === "canceled";
+  const awaitingHold = isAwaitingHold(b);
+  const paid = b.payment_status === "paid";
+  const partial = b.payment_status === "partially_paid";
+  const email = displayEmail(b.invitee.email);
+  const phone = b.invitee.phone?.trim() || null;
+
+  const [guestVal, setGuestVal] = useState(b.guests);
+  const [guestBusy, setGuestBusy] = useState(false);
+  const [guestErr, setGuestErr] = useState<string | null>(null);
+  const [carTypes, setCarTypes] = useState<string[]>(
+    () => b.car_types?.slice() ?? []
+  );
+  const [carBusy, setCarBusy] = useState(false);
+  const [carErr, setCarErr] = useState<string | null>(null);
+  const [requestVal, setRequestVal] = useState(b.special_request ?? "");
+  const [requestBusy, setRequestBusy] = useState(false);
+  const [requestErr, setRequestErr] = useState<string | null>(null);
+  const [rescheduling, setRescheduling] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [releasing, setReleasing] = useState(false);
+  const [settling, setSettling] = useState(false);
   const [busy, setBusy] = useState(false);
-  if (confirming) {
-    return (
-      <span className="flex justify-end gap-2 whitespace-nowrap">
-        <button
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await onCancel(uri);
-            } finally {
-              setBusy(false);
-            }
-          }}
-          disabled={busy}
-          className="text-[11px] uppercase tracking-[0.14em] text-rose-600 hover:text-rose-700 disabled:opacity-50"
-        >
-          {busy ? "…" : "Confirm"}
-        </button>
-        <button
-          onClick={() => setConfirming(false)}
-          className="text-[11px] uppercase tracking-[0.14em] text-eoe-espresso/40 hover:text-eoe-espresso"
-        >
-          Keep
-        </button>
-      </span>
+  const [actionErr, setActionErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setGuestVal(b.guests);
+    setGuestErr(null);
+    setCarTypes(b.car_types?.slice() ?? []);
+    setCarErr(null);
+    setRequestVal(b.special_request ?? "");
+    setRequestErr(null);
+    setActionErr(null);
+    setReleasing(false);
+    setSettling(false);
+  }, [b.uri, b.guests, b.car_types, b.special_request]);
+
+  const guestsDirty = guestVal !== b.guests;
+  const carsKey = (types: string[]) => types.join(",");
+  const carsDirty = carsKey(carTypes) !== carsKey(b.car_types ?? []);
+  const requestDirty =
+    (requestVal.trim() || null) !== (b.special_request?.trim() || null);
+
+  const resizeCars = (count: number) => {
+    const n = Math.min(MAX_CARS_PER_SESSION, Math.max(0, count));
+    setCarTypes((prev) => {
+      if (prev.length === n) return prev;
+      if (n === 0) return [];
+      if (prev.length > n) return prev.slice(0, n);
+      return [
+        ...prev,
+        ...Array.from({ length: n - prev.length }, () => "sedan"),
+      ];
+    });
+  };
+
+  const saveGuests = async () => {
+    if (!Number.isInteger(guestVal) || guestVal < 1) {
+      setGuestErr("Enter a whole number ≥ 1");
+      return;
+    }
+    setGuestBusy(true);
+    setGuestErr(null);
+    const err = await onEditGuests(b.uri, guestVal);
+    setGuestBusy(false);
+    if (err) setGuestErr(err);
+  };
+
+  const saveCars = async () => {
+    setCarBusy(true);
+    setCarErr(null);
+    const err = await onEditCars(
+      b.uri,
+      carTypes.length > 0 ? carTypes : null
     );
-  }
+    setCarBusy(false);
+    if (err) setCarErr(err);
+  };
+
+  const saveRequest = async () => {
+    setRequestBusy(true);
+    setRequestErr(null);
+    const err = await onEditSpecialRequest(
+      b.uri,
+      requestVal.trim() ? requestVal.trim() : null
+    );
+    setRequestBusy(false);
+    if (err) setRequestErr(err);
+  };
+
+  const doCancel = async () => {
+    setBusy(true);
+    setActionErr(null);
+    try {
+      await onCancel(b.uri);
+      onClose();
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+    }
+  };
+
+  const doRelease = async () => {
+    setBusy(true);
+    setActionErr(null);
+    const err = await onReleaseHold(b.uri);
+    setBusy(false);
+    if (err) {
+      setActionErr(err);
+      setReleasing(false);
+      return;
+    }
+    onClose();
+  };
+
+  const doSettle = async () => {
+    setBusy(true);
+    setActionErr(null);
+    const err = await onSettlePayment(b.uri);
+    setBusy(false);
+    if (err) {
+      setActionErr(err);
+      setSettling(false);
+      return;
+    }
+    setSettling(false);
+  };
+
+  const stepCls =
+    "flex h-11 w-11 items-center justify-center rounded-full border border-eoe-espresso/20 text-lg leading-none text-eoe-espresso transition hover:bg-eoe-espresso/5 disabled:opacity-40 sm:h-9 sm:w-9";
+  const selectCls =
+    "min-h-11 w-full rounded-full border border-eoe-espresso/15 bg-white px-3 py-2 text-sm text-eoe-espresso outline-none focus:border-eoe-gold";
+
   return (
-    <button
-      onClick={() => setConfirming(true)}
-      className="text-[11px] uppercase tracking-[0.14em] text-eoe-espresso/50 hover:text-eoe-espresso"
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-eoe-ink/45 px-0 py-0 backdrop-blur-sm sm:items-start sm:px-4 sm:py-10"
     >
-      Cancel
-    </button>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-labelledby="booking-detail-title"
+        className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-eoe-espresso/10 bg-white p-5 shadow-2xl sm:rounded-3xl sm:p-7"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-eoe-espresso/75">
+              Booking details
+            </p>
+            <h2
+              id="booking-detail-title"
+              className="mt-1 font-display text-2xl tracking-wide text-eoe-espresso"
+            >
+              {b.invitee.name}
+            </h2>
+            <p className="mt-1 flex items-center gap-2 text-sm text-eoe-ink">
+              <span
+                className="inline-block h-2.5 w-2.5 rounded-full"
+                style={{ backgroundColor: color }}
+              />
+              {b.name}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full px-2 text-lg leading-none text-eoe-espresso/70 hover:text-eoe-espresso"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="mt-5 flex flex-wrap items-center gap-2">
+          <span
+            className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-wide ${st.cls}`}
+          >
+            {st.label}
+          </span>
+          {st.age && (
+            <span
+              className={`text-xs ${
+                st.stale ? "font-medium text-rose-600" : "text-eoe-espresso/75"
+              }`}
+            >
+              {st.age}
+            </span>
+          )}
+          {(paid || partial) && (
+            <span className="text-xs text-eoe-espresso/75">
+              {money(b.payment_amount_cents)} deposit
+              {partial ? " (balance due)" : ""}
+            </span>
+          )}
+        </div>
+
+        {(paid || partial) && !cancelled && (
+          <p className="mt-3 rounded-xl bg-eoe-ivory px-3 py-2 text-[11px] leading-relaxed text-eoe-espresso/80">
+            Online deposits are non refundable. Editing guests or cars updates
+            the booking only; the amount already paid stays as is. Settle any
+            difference on arrival
+            {partial ? ", then tap Mark settled below" : ""}.
+          </p>
+        )}
+
+        {partial && !cancelled && (
+          <div className="mt-3 rounded-2xl border border-orange-200 bg-orange-50/90 px-4 py-3">
+            <p className="text-xs leading-relaxed text-orange-950/85">
+              Extra guests or car wash added after the online deposit. Collect
+              the balance at the venue, then mark this booking settled.
+            </p>
+            {settling ? (
+              <span className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={doSettle}
+                  disabled={busy}
+                  className="min-h-11 rounded-full bg-emerald-700 px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-white hover:bg-emerald-800 disabled:opacity-50"
+                >
+                  {busy ? "…" : "Confirm settled"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSettling(false)}
+                  className="min-h-11 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/70 hover:text-eoe-espresso"
+                >
+                  Cancel
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setSettling(true)}
+                className="mt-3 min-h-11 rounded-full border border-orange-300 bg-white px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-orange-900 hover:bg-orange-100"
+              >
+                Mark settled
+              </button>
+            )}
+          </div>
+        )}
+
+        {b.special_request?.trim() && (
+          <div className="mt-3">
+            <SpecialRequestBanner text={b.special_request} />
+          </div>
+        )}
+
+        <dl className="mt-5 space-y-3 text-sm">
+          <div className="flex justify-between gap-4 border-b border-eoe-espresso/8 pb-3">
+            <dt className="text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+              When
+            </dt>
+            <dd className="text-right text-eoe-ink">
+              {shortDay(dayKey(b.start_time))}
+              <span className="block text-xs text-eoe-espresso/75">
+                {timeOf(b.start_time)} to {timeOf(b.end_time)}
+              </span>
+            </dd>
+          </div>
+
+          <div className="flex justify-between gap-4 border-b border-eoe-espresso/8 pb-3">
+            <dt className="text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+              Phone
+            </dt>
+            <dd className="text-right">
+              {phone ? (
+                <a
+                  href={`tel:${phone.replace(/\s+/g, "")}`}
+                  className="font-medium text-eoe-espresso underline-offset-2 hover:underline"
+                >
+                  {phone}
+                </a>
+              ) : (
+                <span className="text-eoe-espresso/60">Not provided</span>
+              )}
+            </dd>
+          </div>
+
+          <div className="flex justify-between gap-4 border-b border-eoe-espresso/8 pb-3">
+            <dt className="text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+              Email
+            </dt>
+            <dd className="max-w-[60%] break-all text-right text-eoe-ink">
+              {email ? (
+                <a
+                  href={`mailto:${email}`}
+                  className="text-eoe-espresso underline-offset-2 hover:underline"
+                >
+                  {email}
+                </a>
+              ) : (
+                <span className="text-eoe-espresso/60">Not provided</span>
+              )}
+            </dd>
+          </div>
+
+          <div className="border-b border-eoe-espresso/8 pb-3">
+            <div className="flex items-center justify-between gap-4">
+              <dt className="text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+                Guests
+              </dt>
+              {cancelled ? (
+                <dd className="text-eoe-ink">{b.guests}</dd>
+              ) : (
+                <dd className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    aria-label="Fewer guests"
+                    disabled={guestBusy || guestVal <= 1}
+                    onClick={() => setGuestVal((n) => Math.max(1, n - 1))}
+                    className={stepCls}
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    value={guestVal}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      setGuestVal(Number.isFinite(n) ? n : 1);
+                    }}
+                    className="w-14 rounded-full border border-eoe-espresso/20 bg-white px-2 py-1.5 text-center text-sm text-eoe-espresso outline-none focus:border-eoe-gold"
+                  />
+                  <button
+                    type="button"
+                    aria-label="More guests"
+                    disabled={guestBusy}
+                    onClick={() => setGuestVal((n) => n + 1)}
+                    className={stepCls}
+                  >
+                    +
+                  </button>
+                  {guestsDirty && (
+                    <button
+                      type="button"
+                      onClick={saveGuests}
+                      disabled={guestBusy}
+                      className="ml-1 rounded-full bg-eoe-espresso px-3 py-1.5 text-[10px] uppercase tracking-[0.14em] text-eoe-ivory disabled:opacity-40"
+                    >
+                      {guestBusy ? "…" : "Save"}
+                    </button>
+                  )}
+                </dd>
+              )}
+            </div>
+            {guestErr && (
+              <p className="mt-2 text-right text-[11px] text-rose-600">
+                {guestErr}
+              </p>
+            )}
+            {!cancelled && shared && (
+              <p className="mt-2 text-right text-[11px] text-eoe-espresso/70">
+                Changing party size rechecks seat capacity for this slot.
+              </p>
+            )}
+          </div>
+
+          {allowsCars && (
+            <div className="border-b border-eoe-espresso/8 pb-3">
+              <div className="flex items-center justify-between gap-4">
+                <dt className="text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+                  Cars
+                </dt>
+                {cancelled ? (
+                  <dd className="text-right text-eoe-ink">
+                    {b.cars ?? 0}
+                    {b.car_labels?.length
+                      ? ` · ${b.car_labels.join(", ")}`
+                      : ""}
+                  </dd>
+                ) : (
+                  <dd className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      aria-label="Fewer cars"
+                      disabled={carBusy || carTypes.length <= 0}
+                      onClick={() => resizeCars(carTypes.length - 1)}
+                      className={stepCls}
+                    >
+                      −
+                    </button>
+                    <span className="min-w-[2rem] text-center text-sm text-eoe-ink">
+                      {carTypes.length}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="More cars"
+                      disabled={
+                        carBusy || carTypes.length >= MAX_CARS_PER_SESSION
+                      }
+                      onClick={() => resizeCars(carTypes.length + 1)}
+                      className={stepCls}
+                    >
+                      +
+                    </button>
+                    {carsDirty && (
+                      <button
+                        type="button"
+                        onClick={saveCars}
+                        disabled={carBusy}
+                        className="ml-1 rounded-full bg-eoe-espresso px-3 py-1.5 text-[10px] uppercase tracking-[0.14em] text-eoe-ivory disabled:opacity-40"
+                      >
+                        {carBusy ? "…" : "Save"}
+                      </button>
+                    )}
+                  </dd>
+                )}
+              </div>
+              {!cancelled && carTypes.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {carTypes.map((id, i) => (
+                    <label key={i} className="block">
+                      <span className="mb-1 block text-[10px] uppercase tracking-[0.14em] text-eoe-espresso/70">
+                        Car {i + 1}
+                      </span>
+                      <select
+                        value={id}
+                        disabled={carBusy}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setCarTypes((prev) =>
+                            prev.map((x, j) => (j === i ? v : x))
+                          );
+                        }}
+                        className={selectCls}
+                      >
+                        {CAR_TYPES.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              )}
+              {!cancelled && carTypes.length === 0 && (
+                <p className="mt-2 text-right text-[11px] text-eoe-espresso/70">
+                  No car wash on this booking. Use + to add one.
+                </p>
+              )}
+              {carErr && (
+                <p className="mt-2 text-right text-[11px] text-rose-600">
+                  {carErr}
+                </p>
+              )}
+            </div>
+          )}
+
+          {!cancelled && (
+            <div className="border-b border-eoe-espresso/8 pb-3">
+              <dt className="mb-1.5 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+                Special request
+              </dt>
+              <dd>
+                <textarea
+                  value={requestVal}
+                  onChange={(e) => setRequestVal(e.target.value)}
+                  rows={3}
+                  maxLength={500}
+                  placeholder="Anniversary, birthday, flowers…"
+                  className="w-full rounded-2xl border border-eoe-espresso/15 bg-white px-3.5 py-2 text-sm text-eoe-espresso outline-none focus:border-eoe-gold"
+                />
+                {requestDirty && (
+                  <button
+                    type="button"
+                    onClick={saveRequest}
+                    disabled={requestBusy}
+                    className="mt-2 rounded-full bg-eoe-espresso px-3 py-1.5 text-[10px] uppercase tracking-[0.14em] text-eoe-ivory disabled:opacity-40"
+                  >
+                    {requestBusy ? "…" : "Save request"}
+                  </button>
+                )}
+                {requestErr && (
+                  <p className="mt-2 text-[11px] text-rose-600">{requestErr}</p>
+                )}
+              </dd>
+            </div>
+          )}
+
+          {b.notes && (
+            <div className="border-b border-eoe-espresso/8 pb-3">
+              <dt className="mb-1.5 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+                Internal notes
+              </dt>
+              <dd className="whitespace-pre-line rounded-xl bg-eoe-ivory px-3 py-2 text-xs text-eoe-espresso/85">
+                {b.notes}
+              </dd>
+            </div>
+          )}
+        </dl>
+
+        {actionErr && (
+          <p className="mt-4 text-sm text-rose-600">{actionErr}</p>
+        )}
+
+        {!cancelled && awaitingHold && (
+          <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3">
+            <p className="text-xs leading-relaxed text-amber-900/80">
+              Website checkout hold. If the guest abandoned payment, release
+              the hold to free this slot.
+            </p>
+            {releasing ? (
+              <span className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={doRelease}
+                  disabled={busy}
+                  className="rounded-full bg-rose-100 px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-rose-700 hover:bg-rose-200 disabled:opacity-50"
+                >
+                  {busy ? "…" : "Confirm release"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReleasing(false)}
+                  className="text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/70 hover:text-eoe-espresso"
+                >
+                  Keep hold
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setReleasing(true)}
+                className="mt-3 rounded-full border border-amber-300 bg-white px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-amber-900 hover:bg-amber-100"
+              >
+                Release hold
+              </button>
+            )}
+          </div>
+        )}
+
+        {!cancelled && (
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => setRescheduling((v) => !v)}
+              className="rounded-full border border-eoe-espresso/20 px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/85 hover:bg-eoe-espresso/5"
+            >
+              {rescheduling ? "Hide reschedule" : "Reschedule"}
+            </button>
+            {confirming ? (
+              <span className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={doCancel}
+                  disabled={busy}
+                  className="rounded-full bg-rose-100 px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-rose-700 hover:bg-rose-200 disabled:opacity-50"
+                >
+                  {busy ? "…" : "Confirm cancel"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(false)}
+                  className="text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/70 hover:text-eoe-espresso"
+                >
+                  Keep
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirming(true)}
+                className="rounded-full border border-eoe-espresso/20 px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/85 hover:bg-eoe-espresso/5"
+              >
+                Cancel booking
+              </button>
+            )}
+          </div>
+        )}
+
+        {rescheduling && !cancelled && (
+          <RescheduleControl
+            b={b}
+            shared={shared}
+            onReschedule={onReschedule}
+            onDone={() => {
+              setRescheduling(false);
+              onClose();
+            }}
+          />
+        )}
+      </div>
+    </div>
   );
 }

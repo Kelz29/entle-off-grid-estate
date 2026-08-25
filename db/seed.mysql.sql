@@ -28,9 +28,9 @@ VALUES
   (1, 'Cafe Table Reservation', 'cafe-table-reservation',
    'Reserve a table at The Cafe for a relaxed off grid meal.',
    120, 15, 10000, '#9A6552', 2, 60, 1, 1, 0, 50),
-  (1, 'Estate Tour', 'estate-tour',
-   'A guided walk through the gardens, venue and private estate.',
-   60, 15, 10000, '#CDA98E', 4, 90, 1, 1, 1, 1)
+  (1, 'Cafe Table Reservation + Car Wash', 'cafe-table-car-wash',
+   'Reserve a table at The Cafe and add a car wash. Deposit is R100 per guest plus the wash minimum for each car by type (up to 4 cars).',
+   120, 15, 10000, '#CDA98E', 2, 60, 1, 1, 0, 50)
 ON DUPLICATE KEY UPDATE
   name = VALUES(name),
   description = VALUES(description),
@@ -45,3 +45,8 @@ ON DUPLICATE KEY UPDATE
   exclusive = VALUES(exclusive),
   capacity = VALUES(capacity),
   updated_at = NOW(3);
+
+-- Retire the old Estate Tour offering if it still exists.
+UPDATE services
+   SET is_active = 0, is_available_online = 0, updated_at = NOW(3)
+ WHERE business_id = 1 AND slug = 'estate-tour';

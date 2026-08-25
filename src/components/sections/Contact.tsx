@@ -17,7 +17,7 @@ export function Contact() {
           className="grid gap-10 md:grid-cols-12"
         >
           <div className="md:col-span-5">
-            <p className="text-xs tracking-[0.3em] text-eoe-ivory/70">
+            <p className="text-xs tracking-[0.3em] text-eoe-ivory/90">
               CONTACT
             </p>
             <h2 className="mt-3 font-display text-3xl tracking-[0.18em] md:text-4xl">
@@ -25,14 +25,14 @@ export function Contact() {
               <br />
               return often.
             </h2>
-            <p className="mt-5 text-sm leading-relaxed text-eoe-ivory/80">
+            <p className="mt-5 text-sm leading-relaxed text-eoe-ivory/95">
               We&apos;re a short drive from the city, but designed to feel
               worlds away. Reach out to plan your visit or private event.
             </p>
           </div>
           <div className="space-y-4 text-sm md:col-span-4">
             <div>
-              <p className="text-xs uppercase tracking-[0.22em] text-eoe-ivory/60">
+              <p className="text-xs uppercase tracking-[0.22em] text-eoe-ivory/80">
                 Phone
               </p>
               <p className="mt-1 text-eoe-ivory">
@@ -40,7 +40,7 @@ export function Contact() {
               </p>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-[0.22em] text-eoe-ivory/60">
+              <p className="text-xs uppercase tracking-[0.22em] text-eoe-ivory/80">
                 Instagram
               </p>
               <p className="mt-1">
@@ -55,7 +55,7 @@ export function Contact() {
               </p>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-[0.22em] text-eoe-ivory/60">
+              <p className="text-xs uppercase tracking-[0.22em] text-eoe-ivory/80">
                 Hours
               </p>
               <p className="mt-1 text-eoe-ivory">
@@ -64,7 +64,7 @@ export function Contact() {
             </div>
           </div>
           <div className="space-y-4 text-sm md:col-span-3">
-            <p className="text-xs uppercase tracking-[0.22em] text-eoe-ivory/60">
+            <p className="text-xs uppercase tracking-[0.22em] text-eoe-ivory/80">
               Find us
             </p>
             <p className="text-eoe-ivory">
@@ -76,7 +76,7 @@ export function Contact() {
               href="https://maps.google.com/?q=183+Lakeview,+Bloemfontein,+South+Africa"
               target="_blank"
               rel="noreferrer"
-              className="block h-40 w-full overflow-hidden rounded-2xl border border-eoe-ivory/20 bg-eoe-ink/70 text-[11px] text-eoe-ivory/70 transition hover:border-eoe-gold/50"
+              className="block h-40 w-full overflow-hidden rounded-2xl border border-eoe-ivory/20 bg-eoe-ink/70 text-[11px] text-eoe-ivory/90 transition hover:border-eoe-gold/50"
             >
               <span className="flex h-full items-center justify-center px-4 text-center underline-offset-4 hover:underline">
                 Open in Google Maps →
@@ -85,9 +85,47 @@ export function Contact() {
           </div>
         </motion.div>
 
-        <div className="mt-10 flex flex-col items-start justify-between gap-4 border-t border-eoe-ivory/15 pt-6 text-[11px] text-eoe-ivory/60 md:flex-row md:items-center">
-          <p>© {new Date().getFullYear()} Entle Off Grid Estate. All rights reserved.</p>
-          <p>Site crafted for quiet, editorial luxury.</p>
+        <div className="mt-10 flex flex-col items-start justify-between gap-4 border-t border-eoe-ivory/15 pt-6 text-[11px] text-eoe-ivory/80 md:flex-row md:items-center">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
+            <p>© {new Date().getFullYear()} Entle Off Grid Estate. All rights reserved.</p>
+            <nav
+              aria-label="Explore"
+              className="flex flex-wrap gap-x-4 gap-y-1 uppercase tracking-[0.16em]"
+            >
+              <a href="/menu" className="hover:text-eoe-ivory hover:underline">
+                Menu
+              </a>
+              <a
+                href="/car-wash"
+                className="hover:text-eoe-ivory hover:underline"
+              >
+                Car wash
+              </a>
+              <a
+                href="/#booking"
+                className="hover:text-eoe-ivory hover:underline"
+              >
+                Book
+              </a>
+              <a
+                href="/admin/login"
+                className="hover:text-eoe-ivory hover:underline"
+              >
+                Staff
+              </a>
+            </nav>
+          </div>
+          <p>
+            Developed by{" "}
+            <a
+              href="https://smartmacmane.co.za/"
+              target="_blank"
+              rel="noreferrer"
+              className="underline-offset-4 hover:underline"
+            >
+              Smart Macmane Pty Ltd
+            </a>
+          </p>
         </div>
       </div>
     </footer>

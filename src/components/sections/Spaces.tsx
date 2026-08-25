@@ -13,14 +13,14 @@ export function Spaces() {
       <div className="mx-auto max-w-6xl">
         <div className="mb-10 flex items-baseline justify-between gap-6">
           <div>
-            <p className="text-xs tracking-[0.3em] text-eoe-espresso/70">SPACES</p>
+            <p className="text-xs tracking-[0.3em] text-eoe-espresso">SPACES</p>
             <h2 className="mt-3 font-display text-3xl tracking-[0.18em] text-eoe-espresso md:text-4xl">
-              Rooms for every
+              Spaces for every
               <br />
               kind of gathering.
             </h2>
           </div>
-          <p className="hidden max-w-sm text-sm leading-relaxed text-eoe-espresso/80 md:block">
+          <p className="hidden max-w-sm text-sm leading-relaxed text-eoe-ink/90 md:block">
             Choose from our cafe, venue hall, or open garden. Each space can be
             tailored with our in house styling partners and preferred suppliers.
           </p>

@@ -38,10 +38,10 @@ export interface ServiceRow {
 }
 
 export type BookingStatus = "active" | "cancelled" | "pending";
-export type PaymentStatus = "unpaid" | "paid" | "refunded";
+export type PaymentStatus = "unpaid" | "paid" | "partially_paid" | "refunded";
 
 export interface BookingRow {
-  id: number;
+  id: string;
   business_id: number;
   service_id: number;
   customer_id: number;
@@ -49,7 +49,11 @@ export interface BookingRow {
   end_time: string;
   status: BookingStatus;
   guests: number;
+  cars: number | null;
+  /** JSON array of car type ids when cafe+car-wash; null otherwise. */
+  car_types: string[] | null;
   notes: string | null;
+  special_request: string | null;
   payment_provider: string;
   payment_status: PaymentStatus;
   payment_id: string | null;

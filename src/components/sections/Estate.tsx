@@ -39,7 +39,7 @@ export function Estate() {
           transition={{ duration: 0.9, ease: "easeOut", delay: 0.1 }}
           className="md:w-1/2"
         >
-          <p className="mb-4 text-xs tracking-[0.3em] text-eoe-espresso/70">
+          <p className="mb-4 text-xs tracking-[0.3em] text-eoe-espresso">
             ABOUT THE ESTATE
           </p>
           <h2 className="font-display text-4xl tracking-[0.18em] text-eoe-espresso md:text-5xl">
@@ -47,7 +47,7 @@ export function Estate() {
             <br />
             meets celebration.
           </h2>
-          <p className="mt-6 text-sm leading-relaxed text-eoe-espresso/80 md:text-base">
+          <p className="mt-6 text-sm leading-relaxed text-eoe-ink/90 md:text-base">
             Entle Off Grid Estate is a Black owned, privately held space for
             slow mornings, golden hour gatherings, and evenings that taper into
             stories around the table. Powered by the sun and surrounded by open
@@ -55,13 +55,13 @@ export function Estate() {
             weddings, private dinners, creative retreats, and curated community
             moments.
           </p>
-          <p className="mt-4 text-sm leading-relaxed text-eoe-espresso/80 md:text-base">
+          <p className="mt-4 text-sm leading-relaxed text-eoe-ink/90 md:text-base">
             Every room, pathway, and tablescape is considered. From the
             minimalist cafe to the lawn that folds into the horizon, EOE is less
             a venue and more a feeling: quietly expensive, deeply warm, and
             entirely off grid.
           </p>
-          <p className="mt-8 text-xs uppercase tracking-[0.24em] text-eoe-espresso/70">
+          <p className="mt-8 text-xs uppercase tracking-[0.24em] text-eoe-espresso">
             Private estate • Off grid cafe • Curated events
           </p>
         </motion.div>
