@@ -73,7 +73,7 @@ export function SiteHeader() {
       className="fixed inset-x-0 top-0 z-40 flex justify-center px-3 pt-3 sm:px-4 sm:pt-4"
     >
       <div
-        className={`relative flex w-full max-w-6xl items-center gap-3 rounded-full border border-eoe-espresso/10 px-4 py-2.5 text-sm tracking-[0.18em] uppercase sm:gap-4 sm:px-5 sm:py-3 ${
+        className={`relative flex w-full max-w-6xl items-center gap-2 rounded-full border border-eoe-espresso/10 px-3 py-2.5 text-sm tracking-[0.18em] uppercase sm:gap-3 sm:px-4 sm:py-3 lg:gap-4 lg:px-5 ${
           scrolled
             ? "bg-eoe-ivory/80 backdrop-blur-md shadow-[0_18px_60px_rgba(0,0,0,0.12)]"
             : "bg-eoe-ivory/40 backdrop-blur-sm"
@@ -81,13 +81,13 @@ export function SiteHeader() {
       >
         <Link
           href="/"
-          className="min-w-0 shrink font-display text-sm font-semibold normal-case tracking-[0.08em] sm:text-base lg:shrink-0"
+          className="min-w-0 flex-1 overflow-hidden font-display text-sm font-semibold normal-case tracking-[0.08em] sm:text-base lg:flex-none lg:shrink-0 lg:overflow-visible"
         >
-          <span className="truncate">Entle Off Grid Estate</span>
+          <span className="block truncate lg:inline">Entle Off Grid Estate</span>
         </Link>
 
         <nav
-          className="ml-auto hidden items-center gap-3 lg:flex xl:gap-5"
+          className="ml-auto hidden shrink-0 items-center gap-3 lg:flex xl:gap-5"
           aria-label="Primary"
         >
           {NAV_ITEMS.map((item) => {
@@ -115,13 +115,13 @@ export function SiteHeader() {
             onClick={() =>
               trackEvent(AnalyticsEvents.CtaBook, { source: "header" })
             }
-            className="rounded-full border border-eoe-gold/70 bg-eoe-gold/10 px-3 py-2 text-[10px] font-medium text-eoe-espresso hover:bg-eoe-gold/20 sm:px-4 sm:text-[11px]"
+            className="hidden rounded-full border border-eoe-gold/70 bg-eoe-gold/10 px-4 py-2 text-[11px] font-medium text-eoe-espresso hover:bg-eoe-gold/20 lg:inline-flex"
           >
             Book a Date
           </Link>
           <button
             type="button"
-            className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-full border border-eoe-espresso/20 px-3 py-2 text-[11px] font-medium text-eoe-espresso lg:hidden"
+            className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-full border border-eoe-espresso/20 px-3.5 py-2 text-[11px] font-medium text-eoe-espresso lg:hidden"
             aria-expanded={menuOpen}
             aria-controls="site-nav-panel"
             onClick={() => setMenuOpen((o) => !o)}

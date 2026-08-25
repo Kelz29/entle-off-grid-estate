@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { MobileScrollStrip, mobileScrollSlide } from "@/components/ui/MobileScrollStrip";
 
 const testimonials = [
   {
@@ -40,7 +41,10 @@ export function Testimonials() {
           </div>
         </div>
 
-        <div className="flex gap-4 overflow-x-auto pb-2 md:gap-6">
+        <MobileScrollStrip
+          outerClassName="md:left-auto md:w-full md:max-w-none md:translate-x-0 md:overflow-visible md:pl-0"
+          trackClassName="gap-4 md:grid md:w-full md:max-w-none md:grid-cols-3 md:gap-6 md:snap-none md:pr-0 md:pb-0"
+        >
           {testimonials.map((t, index) => (
             <motion.figure
               key={t.name}
@@ -48,7 +52,7 @@ export function Testimonials() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, amount: 0.4 }}
               transition={{ duration: 0.7, ease: "easeOut", delay: index * 0.08 }}
-              className="min-w-[260px] rounded-3xl border border-eoe-ivory/12 bg-eoe-espresso/80 p-6 md:min-w-[320px] md:p-7"
+              className={`rounded-3xl border border-eoe-ivory/12 bg-eoe-espresso/80 p-6 md:p-7 ${mobileScrollSlide} md:min-w-0`}
             >
               <blockquote className="font-display text-xl leading-relaxed tracking-[0.12em] text-eoe-ivory/90 md:text-2xl">
                 “{t.quote}”
@@ -58,7 +62,7 @@ export function Testimonials() {
               </figcaption>
             </motion.figure>
           ))}
-        </div>
+        </MobileScrollStrip>
       </div>
     </section>
   );

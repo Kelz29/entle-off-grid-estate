@@ -245,6 +245,7 @@ export default function AdminPage() {
     fetcher
   );
   const [showNew, setShowNew] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const all = useMemo(() => data?.collection ?? [], [data]);
   const types = useMemo(() => typesData?.collection ?? [], [typesData]);
@@ -676,6 +677,13 @@ export default function AdminPage() {
           </a>
           <button
             type="button"
+            onClick={() => setShowPassword(true)}
+            className="min-h-11 w-full rounded-full border border-eoe-espresso/15 px-3 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso hover:bg-eoe-ivory"
+          >
+            Change password
+          </button>
+          <button
+            type="button"
             onClick={() => void softRefresh()}
             className="min-h-11 w-full rounded-full border border-eoe-espresso/15 px-3 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso hover:bg-eoe-ivory"
           >
@@ -716,7 +724,7 @@ export default function AdminPage() {
               href="/"
               target="_blank"
               rel="noreferrer"
-              className="min-h-11 rounded-full border border-eoe-espresso/15 px-3.5 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso hover:bg-white"
+              className="min-h-11 rounded-full border border-eoe-espresso/15 px-3 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso hover:bg-white sm:px-3.5"
             >
               Site
             </a>
@@ -730,9 +738,10 @@ export default function AdminPage() {
               canAccessSection(role, "bookings") && (
               <button
                 onClick={() => setShowNew(true)}
-                className="min-h-11 rounded-full bg-eoe-espresso px-3.5 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-ivory transition hover:bg-eoe-espresso/90 sm:px-4 sm:tracking-[0.22em]"
+                className="min-h-11 rounded-full bg-eoe-espresso px-3 py-2.5 text-[11px] uppercase tracking-[0.16em] text-eoe-ivory transition hover:bg-eoe-espresso/90 sm:px-4 sm:tracking-[0.22em]"
               >
-                New booking
+                <span className="sm:hidden">New</span>
+                <span className="hidden sm:inline">New booking</span>
               </button>
             )}
           </div>
@@ -747,6 +756,12 @@ export default function AdminPage() {
                 setShowNew(false);
                 await mutate();
               }}
+            />
+          )}
+          {showPassword && (
+            <ChangePasswordModal
+              username={me?.user ?? ""}
+              onClose={() => setShowPassword(false)}
             />
           )}
 
@@ -849,44 +864,51 @@ export default function AdminPage() {
 
           {section === "bookings" && (
             <div>
-              <section className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
-                <div className="-mx-1 overflow-x-auto px-1 pb-1">
-                  <Segmented
-                    value={statusFilter}
-                    onChange={setStatusFilter}
-                    options={[
-                      ["upcoming", "Upcoming"],
-                      ["today", "Today"],
-                      ["past", "Past"],
-                      ["cancelled", "Cancelled"],
-                      ["all", "All"],
-                    ]}
-                  />
+              <section className="sticky top-[3.25rem] z-20 -mx-3 space-y-3 border-b border-eoe-espresso/10 bg-eoe-ivory/95 px-3 py-3 backdrop-blur sm:top-[3.75rem] sm:-mx-4 sm:px-4 md:static md:z-auto md:mx-0 md:space-y-0 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
+                <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
+                  <div className="-mx-1 overflow-x-auto overscroll-x-contain px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    <Segmented
+                      value={statusFilter}
+                      onChange={setStatusFilter}
+                      options={[
+                        ["upcoming", "Upcoming"],
+                        ["today", "Today"],
+                        ["past", "Past"],
+                        ["cancelled", "Cancelled"],
+                        ["all", "All"],
+                      ]}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                    <select
+                      value={experience}
+                      onChange={(e) => setExperience(e.target.value)}
+                      className="min-h-11 w-full rounded-full border border-eoe-espresso/15 bg-white px-4 py-2.5 text-sm text-eoe-espresso outline-none focus:border-eoe-gold sm:w-auto sm:min-w-[11rem]"
+                    >
+                      <option value="all">All experiences</option>
+                      {types.map((t) => (
+                        <option key={t.uri} value={serviceId(t.uri)}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={q}
+                      onChange={(e) => setQ(e.target.value)}
+                      placeholder="Search guest, email, phone"
+                      className="min-h-11 min-w-0 flex-1 rounded-full border border-eoe-espresso/15 bg-white px-4 py-2.5 text-sm text-eoe-espresso outline-none placeholder:text-eoe-espresso/70 focus:border-eoe-gold sm:min-w-[12rem]"
+                    />
+                    <div className="hidden sm:block">
+                      <Toggle value={view} onChange={setView} />
+                    </div>
+                  </div>
                 </div>
-                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-                  <select
-                    value={experience}
-                    onChange={(e) => setExperience(e.target.value)}
-                    className="min-h-11 w-full rounded-full border border-eoe-espresso/15 bg-white px-4 py-2.5 text-sm text-eoe-espresso outline-none focus:border-eoe-gold sm:w-auto"
-                  >
-                    <option value="all">All experiences</option>
-                    {types.map((t) => (
-                      <option key={t.uri} value={serviceId(t.uri)}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder="Search guest, email, phone"
-                    className="min-h-11 min-w-0 flex-1 rounded-full border border-eoe-espresso/15 bg-white px-4 py-2.5 text-sm text-eoe-espresso outline-none placeholder:text-eoe-espresso/70 focus:border-eoe-gold sm:min-w-[200px]"
-                  />
+                <div className="sm:hidden">
                   <Toggle value={view} onChange={setView} />
                 </div>
               </section>
 
-              <p className="mt-5 text-xs uppercase tracking-[0.2em] text-eoe-espresso/70">
+              <p className="mt-4 text-xs uppercase tracking-[0.2em] text-eoe-espresso/70 sm:mt-5">
                 {sorted.length} {sorted.length === 1 ? "booking" : "bookings"}
               </p>
 
@@ -902,19 +924,19 @@ export default function AdminPage() {
               )}
 
               {view === "agenda" ? (
-                <div className="mt-4 space-y-8">
+                <div className="mt-3 space-y-6 sm:mt-4 sm:space-y-8">
                   {grouped.map(([key, items]) => (
                     <div key={key}>
-                      <div className="flex items-baseline justify-between border-b border-eoe-gold/40 pb-2">
-                        <h2 className="font-display text-xl tracking-wide text-eoe-espresso">
+                      <div className="flex items-baseline justify-between gap-3 border-b border-eoe-gold/40 pb-2">
+                        <h2 className="min-w-0 font-display text-lg tracking-wide text-eoe-espresso sm:text-xl">
                           {relativeDay(key, today)}
                         </h2>
-                        <span className="text-xs text-eoe-espresso/70">
+                        <span className="shrink-0 text-[11px] text-eoe-espresso/70 sm:text-xs">
                           {items.length} ·{" "}
                           {items.reduce((s, b) => s + b.guests, 0)} guests
                         </span>
                       </div>
-                      <div className="mt-3 space-y-3">
+                      <div className="mt-3 space-y-2.5 sm:space-y-3">
                         {items.map((b) => (
                           <BookingCard
                             key={b.uri}
@@ -990,7 +1012,7 @@ export default function AdminPage() {
                   onClick={() => setPayFilter("arrival")}
                 />
               </section>
-              <div className="-mx-1 overflow-x-auto px-1 pb-1">
+              <div className="-mx-1 overflow-x-auto overscroll-x-contain px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 <Segmented
                   value={payFilter}
                   onChange={setPayFilter}
@@ -1289,6 +1311,9 @@ function UsersPanel() {
   const [role, setRole] = useState<"manager" | "staff">("staff");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [resetId, setResetId] = useState<number | null>(null);
+  const [resetPw, setResetPw] = useState("");
+  const [resetPw2, setResetPw2] = useState("");
 
   const creatable = ADMIN_ROLES.filter((r) => r.id !== "owner");
 
@@ -1363,8 +1388,44 @@ function UsersPanel() {
     await mutate();
   };
 
+  const saveResetPassword = async (e: FormEvent) => {
+    e.preventDefault();
+    if (resetId == null) return;
+    if (resetPw.length < 8) {
+      setMsg("Password must be at least 8 characters");
+      return;
+    }
+    if (resetPw !== resetPw2) {
+      setMsg("Passwords do not match");
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await adminFetch(`/api/admin/users/${resetId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: resetPw }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg(d.detail ?? "Could not update password");
+        return;
+      }
+      setResetId(null);
+      setResetPw("");
+      setResetPw2("");
+      setMsg("Password updated");
+      await mutate();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const inputCls =
     "min-h-11 w-full rounded-full border border-eoe-espresso/15 bg-white px-4 py-2.5 text-sm text-eoe-espresso outline-none focus:border-eoe-gold";
+
+  const resetTarget = users.find((u) => u.id === resetId);
 
   return (
     <div className="space-y-6">
@@ -1383,7 +1444,8 @@ function UsersPanel() {
         </ul>
         <p className="mt-3 text-xs leading-relaxed text-eoe-espresso/70">
           Owner signs in with the env account (ADMIN_USER). Create manager or
-          staff accounts here for day-to-day access.
+          staff accounts here for day-to-day access. You can reset any staff
+          password below; each person can also change their own from the sidebar.
         </p>
       </div>
 
@@ -1462,6 +1524,67 @@ function UsersPanel() {
         </div>
       </form>
 
+      {resetTarget && (
+        <form
+          onSubmit={saveResetPassword}
+          className="rounded-2xl border border-eoe-gold/40 bg-eoe-gold/5 p-4 shadow-sm sm:p-5"
+        >
+          <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/75">
+            Set password for @{resetTarget.username}
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+                New password
+              </span>
+              <input
+                type="password"
+                value={resetPw}
+                onChange={(e) => setResetPw(e.target.value)}
+                required
+                minLength={8}
+                autoComplete="new-password"
+                className={inputCls}
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+                Confirm password
+              </span>
+              <input
+                type="password"
+                value={resetPw2}
+                onChange={(e) => setResetPw2(e.target.value)}
+                required
+                minLength={8}
+                autoComplete="new-password"
+                className={inputCls}
+              />
+            </label>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="submit"
+              disabled={busy}
+              className="min-h-11 rounded-full bg-eoe-espresso px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-eoe-ivory disabled:opacity-40"
+            >
+              {busy ? "Saving…" : "Save password"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setResetId(null);
+                setResetPw("");
+                setResetPw2("");
+              }}
+              className="min-h-11 rounded-full border border-eoe-espresso/15 px-5 py-2.5 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
       {isLoading && (
         <p className="text-sm text-eoe-espresso/85">Loading users…</p>
       )}
@@ -1512,24 +1635,38 @@ function UsersPanel() {
                   {u.is_active ? "Active" : "Disabled"}
                 </span>
               </div>
-              {u.role !== "owner" && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void setActive(u.id, !u.is_active)}
-                    className="min-h-10 rounded-full border border-eoe-espresso/15 px-3 text-[10px] uppercase tracking-[0.14em] text-eoe-espresso"
-                  >
-                    {u.is_active ? "Disable" : "Enable"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void remove(u.id, u.username)}
-                    className="min-h-10 rounded-full border border-rose-200 px-3 text-[10px] uppercase tracking-[0.14em] text-rose-700"
-                  >
-                    Remove
-                  </button>
-                </div>
-              )}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResetId(u.id);
+                    setResetPw("");
+                    setResetPw2("");
+                    setMsg(null);
+                  }}
+                  className="min-h-10 rounded-full border border-eoe-espresso/15 px-3 text-[10px] uppercase tracking-[0.14em] text-eoe-espresso"
+                >
+                  Set password
+                </button>
+                {u.role !== "owner" && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void setActive(u.id, !u.is_active)}
+                      className="min-h-10 rounded-full border border-eoe-espresso/15 px-3 text-[10px] uppercase tracking-[0.14em] text-eoe-espresso"
+                    >
+                      {u.is_active ? "Disable" : "Enable"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void remove(u.id, u.username)}
+                      className="min-h-10 rounded-full border border-rose-200 px-3 text-[10px] uppercase tracking-[0.14em] text-rose-700"
+                    >
+                      Remove
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -1581,24 +1718,38 @@ function UsersPanel() {
                     {u.is_active ? "Active" : "Disabled"}
                   </td>
                   <td className="px-4 py-3">
-                    {u.role !== "owner" && (
-                      <span className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void setActive(u.id, !u.is_active)}
-                          className="text-[11px] uppercase tracking-[0.14em] text-eoe-espresso hover:underline"
-                        >
-                          {u.is_active ? "Disable" : "Enable"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void remove(u.id, u.username)}
-                          className="text-[11px] uppercase tracking-[0.14em] text-rose-700 hover:underline"
-                        >
-                          Remove
-                        </button>
-                      </span>
-                    )}
+                    <span className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResetId(u.id);
+                          setResetPw("");
+                          setResetPw2("");
+                          setMsg(null);
+                        }}
+                        className="text-[11px] uppercase tracking-[0.14em] text-eoe-espresso hover:underline"
+                      >
+                        Set password
+                      </button>
+                      {u.role !== "owner" && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void setActive(u.id, !u.is_active)}
+                            className="text-[11px] uppercase tracking-[0.14em] text-eoe-espresso hover:underline"
+                          >
+                            {u.is_active ? "Disable" : "Enable"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void remove(u.id, u.username)}
+                            className="text-[11px] uppercase tracking-[0.14em] text-rose-700 hover:underline"
+                          >
+                            Remove
+                          </button>
+                        </>
+                      )}
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -1606,6 +1757,162 @@ function UsersPanel() {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+function ChangePasswordModal({
+  username,
+  onClose,
+}: {
+  username: string;
+  onClose: () => void;
+}) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const inputCls =
+    "min-h-11 w-full rounded-full border border-eoe-espresso/15 bg-white px-4 py-2.5 text-sm text-eoe-espresso outline-none focus:border-eoe-gold";
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (next.length < 8) {
+      setError("New password must be at least 8 characters");
+      return;
+    }
+    if (next !== confirm) {
+      setError("New passwords do not match");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await adminFetch("/api/admin/me/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          current_password: current,
+          new_password: next,
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(d.detail ?? "Could not change password");
+        return;
+      }
+      setDone(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-end justify-center bg-eoe-ink/45 px-0 py-0 backdrop-blur-sm sm:items-center sm:px-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-labelledby="change-password-title"
+        className="w-full max-w-md rounded-t-3xl border border-eoe-espresso/10 bg-white p-5 shadow-2xl sm:rounded-3xl sm:p-7"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-eoe-espresso/75">
+              Account
+            </p>
+            <h2
+              id="change-password-title"
+              className="mt-1 font-display text-2xl tracking-wide text-eoe-espresso"
+            >
+              Change password
+            </h2>
+            {username && (
+              <p className="mt-1 text-xs text-eoe-espresso/70">@{username}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-eoe-espresso/15 text-xl text-eoe-espresso/70"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        {done ? (
+          <div className="mt-6">
+            <p className="text-sm text-eoe-ink">
+              Password updated. Use the new password next time you sign in.
+            </p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-5 min-h-11 w-full rounded-full bg-eoe-espresso px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-eoe-ivory"
+            >
+              Done
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={submit} className="mt-5 space-y-3">
+            <label className="block">
+              <span className="mb-1 block text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+                Current password
+              </span>
+              <input
+                type="password"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+                required
+                autoComplete="current-password"
+                className={inputCls}
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+                New password
+              </span>
+              <input
+                type="password"
+                value={next}
+                onChange={(e) => setNext(e.target.value)}
+                required
+                minLength={8}
+                autoComplete="new-password"
+                className={inputCls}
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75">
+                Confirm new password
+              </span>
+              <input
+                type="password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                required
+                minLength={8}
+                autoComplete="new-password"
+                className={inputCls}
+              />
+            </label>
+            {error && <p className="text-sm text-rose-600">{error}</p>}
+            <button
+              type="submit"
+              disabled={busy}
+              className="min-h-11 w-full rounded-full bg-eoe-espresso px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-eoe-ivory disabled:opacity-40"
+            >
+              {busy ? "Saving…" : "Update password"}
+            </button>
+          </form>
+        )}
+      </div>
     </div>
   );
 }
@@ -2417,17 +2724,20 @@ function Kpi({
       : tone === "muted"
         ? "text-eoe-espresso/80"
         : "text-eoe-ink";
-  const shared = `rounded-2xl border px-5 py-4 text-left shadow-sm ${cardCls} ${
+  const shared = `rounded-2xl border px-3.5 py-3.5 text-left shadow-sm sm:px-5 sm:py-4 ${cardCls} ${
     onClick
-      ? "cursor-pointer transition hover:border-eoe-espresso/25 hover:shadow-md"
+      ? "cursor-pointer transition hover:border-eoe-espresso/25 hover:shadow-md active:scale-[0.99]"
       : ""
   }`;
   const body = (
     <>
-      <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/75">
+      <p className="text-[10px] uppercase tracking-[0.18em] text-eoe-espresso/75 sm:text-[11px] sm:tracking-[0.22em]">
         {label}
       </p>
-      <p className={`mt-2 font-display text-3xl ${valueCls}`} style={valueStyle}>
+      <p
+        className={`mt-1.5 font-display text-2xl sm:mt-2 sm:text-3xl ${valueCls}`}
+        style={valueStyle}
+      >
         {value}
       </p>
     </>
@@ -2534,19 +2844,24 @@ function Segmented<T extends string>({
 
 function Toggle({ value, onChange }: { value: View; onChange: (v: View) => void }) {
   return (
-    <div className="inline-flex rounded-full border border-eoe-espresso/15 bg-white p-1 text-[11px] uppercase tracking-[0.16em]">
-      {(["agenda", "table"] as View[]).map((v) => (
+    <div className="inline-flex w-full rounded-full border border-eoe-espresso/15 bg-white p-1 text-[11px] uppercase tracking-[0.16em] sm:w-auto">
+      {(
+        [
+          ["agenda", "Agenda"],
+          ["table", "List"],
+        ] as [View, string][]
+      ).map(([v, label]) => (
         <button
           key={v}
           type="button"
           onClick={() => onChange(v)}
-          className={`min-h-10 rounded-full px-3.5 py-2 font-semibold transition ${
+          className={`min-h-10 flex-1 rounded-full px-3.5 py-2 font-semibold transition sm:flex-none ${
             value === v
               ? "bg-eoe-gold text-eoe-ivory"
               : "font-normal text-eoe-espresso/80 hover:text-eoe-espresso"
           }`}
         >
-          {v}
+          {label}
         </button>
       ))}
     </div>
@@ -2654,125 +2969,121 @@ function BookingCard({
         cancelled
           ? "border-eoe-espresso/8 bg-eoe-ivory/70"
           : "border-eoe-espresso/10 bg-white"
-      } px-5 py-4`}
+      } px-3.5 py-3.5 sm:px-5 sm:py-4`}
     >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <button
-          type="button"
-          onClick={onOpen}
-          className="flex min-w-0 flex-1 gap-4 rounded-xl text-left transition hover:bg-eoe-ivory/70"
-        >
-          <div className="w-14 shrink-0 text-center">
-            <p className="font-display text-lg text-eoe-espresso">
-              {timeOf(b.start_time)}
-            </p>
-            <p className="text-[10px] text-eoe-espresso/70">
-              {timeOf(b.end_time)}
-            </p>
-          </div>
-          <div className="min-w-0 py-0.5">
-            <p className="flex flex-wrap items-center gap-2 font-medium text-eoe-espresso">
-              <span
-                className="inline-block h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: color }}
-              />
-              {b.name}
-              <span className="text-xs font-normal text-eoe-espresso/70">
-                · {b.guests} {b.guests === 1 ? "guest" : "guests"}
-                {b.cars != null && b.cars > 0
-                  ? ` · ${b.cars} ${b.cars === 1 ? "car" : "cars"}${
-                      b.car_labels?.length
-                        ? ` (${b.car_labels.join(", ")})`
-                        : ""
-                    }`
-                  : ""}
-              </span>
-            </p>
-            <p className="mt-1 text-sm text-eoe-ink">{b.invitee.name}</p>
-            <p className="text-xs text-eoe-espresso/75">
-              {displayEmail(b.invitee.email)}
-              {b.invitee.phone
-                ? `${displayEmail(b.invitee.email) ? " · " : ""}${b.invitee.phone}`
-                : ""}
-            </p>
-            {b.notes && (
-              <p className="mt-2 max-w-xl whitespace-pre-line rounded-lg bg-eoe-ivory px-3 py-2 text-xs text-eoe-espresso/85">
-                {b.notes}
-              </p>
-            )}
-            {b.special_request?.trim() && (
-              <div className="mt-2 max-w-xl">
-                <SpecialRequestBanner text={b.special_request} />
-              </div>
-            )}
-            <p className="mt-2 text-[10px] uppercase tracking-[0.16em] text-eoe-espresso/60">
-              Tap to edit guests, cars, and contact
-            </p>
-          </div>
-        </button>
-
-        <div className="flex flex-col items-end gap-2 text-xs">
-          <span
-            className={`rounded-full px-3 py-1 font-semibold uppercase tracking-wide ${st.cls}`}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-start justify-between gap-3">
+          <button
+            type="button"
+            onClick={onOpen}
+            className="flex min-w-0 flex-1 gap-3 rounded-xl text-left transition active:bg-eoe-ivory/80 sm:gap-4 sm:hover:bg-eoe-ivory/70"
           >
-            {st.label}
-          </span>
-          {st.age && (
+            <div className="w-12 shrink-0 text-center sm:w-14">
+              <p className="font-display text-base text-eoe-espresso sm:text-lg">
+                {timeOf(b.start_time)}
+              </p>
+              <p className="text-[10px] text-eoe-espresso/70">
+                {timeOf(b.end_time)}
+              </p>
+            </div>
+            <div className="min-w-0 flex-1 py-0.5">
+              <p className="truncate text-base font-medium text-eoe-ink sm:text-sm">
+                {b.invitee.name}
+              </p>
+              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-eoe-espresso sm:text-xs sm:font-medium">
+                <span
+                  className="inline-block h-2 w-2 shrink-0 rounded-full sm:h-2.5 sm:w-2.5"
+                  style={{ backgroundColor: color }}
+                />
+                <span className="min-w-0 truncate">{b.name}</span>
+                <span className="text-eoe-espresso/70">
+                  · {b.guests} {b.guests === 1 ? "guest" : "guests"}
+                  {b.cars != null && b.cars > 0
+                    ? ` · ${b.cars} ${b.cars === 1 ? "car" : "cars"}`
+                    : ""}
+                </span>
+              </p>
+              <p className="mt-1 truncate text-xs text-eoe-espresso/75">
+                {b.invitee.phone ||
+                  displayEmail(b.invitee.email) ||
+                  "No contact"}
+              </p>
+            </div>
+          </button>
+
+          <div className="flex shrink-0 flex-col items-end gap-1.5 text-xs">
             <span
-              className={
-                st.stale ? "font-medium text-rose-600" : "text-eoe-espresso/75"
-              }
+              className={`max-w-[9.5rem] rounded-full px-2.5 py-1 text-center text-[10px] font-semibold uppercase leading-tight tracking-wide sm:max-w-none sm:px-3 ${st.cls}`}
             >
-              {st.age}
+              {st.label}
             </span>
-          )}
-          {(b.payment_status === "paid" ||
-            b.payment_status === "partially_paid") && (
-            <span className="text-eoe-espresso/75">
-              {money(b.payment_amount_cents)} deposit
-              {b.payment_status === "partially_paid" ? " (balance due)" : ""}
-            </span>
-          )}
-          {!cancelled &&
-            (confirming ? (
-              <span className="flex items-center gap-2">
-                <button
-                  onClick={doCancel}
-                  disabled={busy}
-                  className="rounded-full bg-rose-100 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-rose-700 hover:bg-rose-200 disabled:opacity-50"
-                >
-                  {busy ? "…" : "Confirm"}
-                </button>
-                <button
-                  onClick={() => setConfirming(false)}
-                  className="text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/70 hover:text-eoe-espresso"
-                >
-                  Keep
-                </button>
+            {st.age && (
+              <span
+                className={
+                  st.stale ? "font-medium text-rose-600" : "text-eoe-espresso/75"
+                }
+              >
+                {st.age}
               </span>
-            ) : (
-              <span className="flex flex-wrap items-center justify-end gap-2">
-                <button
-                  onClick={onOpen}
-                  className="rounded-full border border-eoe-espresso/20 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/85 hover:bg-eoe-espresso/5"
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() => setRescheduling((v) => !v)}
-                  className="rounded-full border border-eoe-espresso/20 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/85 hover:bg-eoe-espresso/5"
-                >
-                  {rescheduling ? "Close" : "Reschedule"}
-                </button>
-                <button
-                  onClick={() => setConfirming(true)}
-                  className="rounded-full border border-eoe-espresso/20 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/85 hover:bg-eoe-espresso/5"
-                >
-                  Cancel
-                </button>
+            )}
+            {(b.payment_status === "paid" ||
+              b.payment_status === "partially_paid") && (
+              <span className="text-right text-[11px] text-eoe-espresso/75">
+                {money(b.payment_amount_cents)}
+                {b.payment_status === "partially_paid" ? " due" : ""}
               </span>
-            ))}
+            )}
+          </div>
         </div>
+
+        {b.notes && (
+          <p className="whitespace-pre-line rounded-lg bg-eoe-ivory px-3 py-2 text-xs text-eoe-espresso/85">
+            {b.notes}
+          </p>
+        )}
+        {b.special_request?.trim() && (
+          <SpecialRequestBanner text={b.special_request} />
+        )}
+
+        {!cancelled &&
+          (confirming ? (
+            <div className="flex flex-wrap items-center gap-2 border-t border-eoe-espresso/8 pt-3">
+              <button
+                onClick={doCancel}
+                disabled={busy}
+                className="min-h-11 flex-1 rounded-full bg-rose-100 px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-rose-700 hover:bg-rose-200 disabled:opacity-50 sm:flex-none"
+              >
+                {busy ? "…" : "Confirm cancel"}
+              </button>
+              <button
+                onClick={() => setConfirming(false)}
+                className="min-h-11 px-3 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/70 hover:text-eoe-espresso"
+              >
+                Keep
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-2 border-t border-eoe-espresso/8 pt-3">
+              <button
+                onClick={onOpen}
+                className="min-h-11 rounded-full border border-eoe-espresso/20 px-2 py-2 text-[11px] uppercase tracking-[0.14em] text-eoe-espresso hover:bg-eoe-espresso/5"
+              >
+                Open
+              </button>
+              <button
+                onClick={() => setRescheduling((v) => !v)}
+                className="min-h-11 rounded-full border border-eoe-espresso/20 px-2 py-2 text-[11px] uppercase tracking-[0.14em] text-eoe-espresso hover:bg-eoe-espresso/5"
+              >
+                {rescheduling ? "Close" : "Move"}
+              </button>
+              <button
+                onClick={() => setConfirming(true)}
+                className="min-h-11 rounded-full border border-eoe-espresso/20 px-2 py-2 text-[11px] uppercase tracking-[0.14em] text-eoe-espresso hover:bg-eoe-espresso/5"
+              >
+                Cancel
+              </button>
+            </div>
+          ))}
       </div>
 
       {rescheduling && !cancelled && (
@@ -2845,8 +3156,8 @@ function RescheduleControl({
   };
 
   return (
-    <div className="mt-4 rounded-xl border border-eoe-espresso/10 bg-eoe-ivory/60 p-4">
-      <div className="flex flex-wrap items-center gap-3">
+    <div className="mt-4 rounded-xl border border-eoe-espresso/10 bg-eoe-ivory/60 p-3 sm:p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
         <span className="text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/75">
           Move to
         </span>
@@ -2855,13 +3166,13 @@ function RescheduleControl({
           value={date}
           min={todayKey}
           onChange={(e) => setDate(e.target.value)}
-          className="rounded-full border border-eoe-espresso/15 bg-white px-3 py-1.5 text-sm text-eoe-espresso outline-none focus:border-eoe-gold"
+          className="min-h-11 w-full rounded-full border border-eoe-espresso/15 bg-white px-3 py-2 text-sm text-eoe-espresso outline-none focus:border-eoe-gold sm:w-auto sm:min-h-0 sm:py-1.5"
         />
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {loading && <p className="text-xs text-eoe-espresso/70">Loading…</p>}
+      <div className="mt-3 grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
+        {loading && <p className="col-span-3 text-xs text-eoe-espresso/70">Loading…</p>}
         {!loading && times.length === 0 && (
-          <p className="text-xs text-eoe-espresso/70">
+          <p className="col-span-3 text-xs text-eoe-espresso/70">
             No open times on this day.
           </p>
         )}
@@ -2870,7 +3181,7 @@ function RescheduleControl({
             key={t.start_time}
             disabled={busy}
             onClick={() => move(t.start_time)}
-            className="flex flex-col items-center rounded-xl border border-eoe-espresso/20 px-3 py-1.5 text-sm text-eoe-espresso transition hover:border-eoe-gold hover:bg-white disabled:opacity-50"
+            className="flex min-h-11 flex-col items-center justify-center rounded-xl border border-eoe-espresso/20 px-2 py-2 text-sm text-eoe-espresso transition hover:border-eoe-gold hover:bg-white disabled:opacity-50 sm:min-h-0 sm:px-3 sm:py-1.5"
           >
             {timeOf(t.start_time)}
             {shared && (
@@ -2905,96 +3216,159 @@ function PaymentsTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-2xl border border-eoe-espresso/10 bg-white shadow-sm">
-      <table className="w-full min-w-[720px] text-left text-sm">
-        <thead className="bg-eoe-ivory text-[10px] uppercase tracking-[0.18em] text-eoe-espresso/70">
-          <tr>
-            <th className="px-4 py-3 font-medium">When</th>
-            <th className="px-4 py-3 font-medium">Guest</th>
-            <th className="px-4 py-3 font-medium">Experience</th>
-            <th className="px-4 py-3 font-medium">Amount</th>
-            <th className="px-4 py-3 font-medium">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((b) => {
-            const st = statusOf(b);
-            return (
-              <tr
-                key={b.uri}
-                role="button"
-                tabIndex={0}
-                onClick={() => onOpenDetail(b.uri)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onOpenDetail(b.uri);
-                  }
-                }}
-                className="cursor-pointer border-t border-eoe-espresso/8 text-eoe-ink transition hover:bg-eoe-ivory/80"
-              >
-                <td className="whitespace-nowrap px-4 py-3">
-                  <div>{shortDay(dayKey(b.start_time))}</div>
-                  <div className="text-xs text-eoe-espresso/70">
-                    {timeOf(b.start_time)}
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <div>{b.invitee.name}</div>
-                  <div className="text-xs text-eoe-espresso/70">
-                    {displayEmail(b.invitee.email) || b.invitee.phone || ""}
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <span className="flex items-center gap-2">
-                    <span
-                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: colorFor(b.event_type) }}
-                    />
-                    {b.name}
-                  </span>
-                </td>
-                <td className="whitespace-nowrap px-4 py-3">
-                  {b.payment_status === "paid" ||
-                  b.payment_status === "partially_paid"
-                    ? money(b.payment_amount_cents)
-                    : b.pay_on_arrival
-                      ? "At restaurant"
-                      : "Unpaid"}
-                  {b.payment_status === "partially_paid" && (
-                    <span className="mt-0.5 block text-[11px] text-orange-700">
-                      Balance on arrival
+    <>
+      <div className="space-y-2.5 lg:hidden">
+        {rows.map((b) => (
+          <BookingMobileRow
+            key={b.uri}
+            b={b}
+            color={colorFor(b.event_type)}
+            today={venueTodayKey()}
+            onOpen={() => onOpenDetail(b.uri)}
+          />
+        ))}
+      </div>
+      <div className="hidden overflow-x-auto rounded-2xl border border-eoe-espresso/10 bg-white shadow-sm lg:block">
+        <table className="w-full min-w-[720px] text-left text-sm">
+          <thead className="bg-eoe-ivory text-[10px] uppercase tracking-[0.18em] text-eoe-espresso/70">
+            <tr>
+              <th className="px-4 py-3 font-medium">When</th>
+              <th className="px-4 py-3 font-medium">Guest</th>
+              <th className="px-4 py-3 font-medium">Experience</th>
+              <th className="px-4 py-3 font-medium">Amount</th>
+              <th className="px-4 py-3 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((b) => {
+              const st = statusOf(b);
+              return (
+                <tr
+                  key={b.uri}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onOpenDetail(b.uri)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onOpenDetail(b.uri);
+                    }
+                  }}
+                  className="cursor-pointer border-t border-eoe-espresso/8 text-eoe-ink transition hover:bg-eoe-ivory/80"
+                >
+                  <td className="whitespace-nowrap px-4 py-3">
+                    <div>{shortDay(dayKey(b.start_time))}</div>
+                    <div className="text-xs text-eoe-espresso/70">
+                      {timeOf(b.start_time)}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div>{b.invitee.name}</div>
+                    <div className="text-xs text-eoe-espresso/70">
+                      {displayEmail(b.invitee.email) || b.invitee.phone || ""}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="flex items-center gap-2">
+                      <span
+                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: colorFor(b.event_type) }}
+                      />
+                      {b.name}
                     </span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  <span
-                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${st.cls}`}
-                  >
-                    {st.label}
-                  </span>
-                  {st.age && (
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {b.payment_status === "paid" ||
+                    b.payment_status === "partially_paid"
+                      ? money(b.payment_amount_cents)
+                      : b.pay_on_arrival
+                        ? "At restaurant"
+                        : "Unpaid"}
+                    {b.payment_status === "partially_paid" && (
+                      <span className="mt-0.5 block text-[11px] text-orange-700">
+                        Balance on arrival
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
                     <span
-                      className={`mt-1 block text-[11px] ${
-                        st.stale
-                          ? "font-medium text-rose-600"
-                          : "text-eoe-espresso/70"
-                      }`}
+                      className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${st.cls}`}
                     >
-                      {st.age}
+                      {st.label}
                     </span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                    {st.age && (
+                      <span
+                        className={`mt-1 block text-[11px] ${
+                          st.stale
+                            ? "font-medium text-rose-600"
+                            : "text-eoe-espresso/70"
+                        }`}
+                      >
+                        {st.age}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
 // ---------- table ----------
+function BookingMobileRow({
+  b,
+  color,
+  today,
+  active,
+  onOpen,
+}: {
+  b: ScheduledEvent;
+  color: string;
+  today: string;
+  active?: boolean;
+  onOpen: () => void;
+}) {
+  const st = statusOf(b);
+  const cancelled = b.status === "canceled";
+  const day = dayKey(b.start_time);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className={`flex w-full items-start justify-between gap-3 rounded-2xl border px-3.5 py-3.5 text-left shadow-sm transition active:scale-[0.99] ${
+        cancelled
+          ? "border-eoe-espresso/8 bg-eoe-ivory/70 text-eoe-espresso/70"
+          : "border-eoe-espresso/10 bg-white text-eoe-ink"
+      } ${active ? "ring-2 ring-eoe-gold/40" : ""}`}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-medium">{b.invitee.name}</p>
+        <p className="mt-0.5 text-xs text-eoe-espresso/80">
+          {day === today ? "Today" : shortDay(day)} · {timeOf(b.start_time)} ·{" "}
+          {b.guests} {b.guests === 1 ? "guest" : "guests"}
+        </p>
+        <p className="mt-1 flex items-center gap-2 text-xs text-eoe-espresso">
+          <span
+            className="inline-block h-2 w-2 shrink-0 rounded-full"
+            style={{ backgroundColor: color }}
+          />
+          <span className="truncate">{b.name}</span>
+        </p>
+        <SpecialRequestBanner text={b.special_request} compact />
+      </div>
+      <span
+        className={`max-w-[7.5rem] shrink-0 rounded-full px-2.5 py-1 text-center text-[10px] font-semibold uppercase leading-tight tracking-wide ${st.cls}`}
+      >
+        {st.label}
+      </span>
+    </button>
+  );
+}
+
 function TableView({
   rows,
   colorFor,
@@ -3009,121 +3383,135 @@ function TableView({
   onOpenDetail: (uri: string) => void;
 }) {
   return (
-    <div className="mt-4 overflow-x-auto rounded-2xl border border-eoe-espresso/10 bg-white shadow-sm">
-      <table className="w-full min-w-[720px] text-left text-sm">
-        <thead className="bg-eoe-ivory text-[10px] uppercase tracking-[0.18em] text-eoe-espresso/70">
-          <tr>
-            <th className="px-4 py-3 font-medium">Date</th>
-            <th className="px-4 py-3 font-medium">Time</th>
-            <th className="px-4 py-3 font-medium">Experience</th>
-            <th className="px-4 py-3 font-medium">Guest</th>
-            <th className="px-4 py-3 font-medium">Pax</th>
-            <th className="px-4 py-3 font-medium">Payment</th>
-            <th className="px-4 py-3 font-medium">Status</th>
-            <th className="px-4 py-3 font-medium" />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((b) => {
-            const st = statusOf(b);
-            const cancelled = b.status === "canceled";
-            return (
-              <tr
-                key={b.uri}
-                role="button"
-                tabIndex={0}
-                onClick={() => onOpenDetail(b.uri)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onOpenDetail(b.uri);
-                  }
-                }}
-                className={`cursor-pointer border-t border-eoe-espresso/8 transition hover:bg-eoe-ivory/80 ${
-                  cancelled ? "text-eoe-espresso/70" : "text-eoe-ink"
-                } ${activeUri === b.uri ? "bg-eoe-gold/10" : ""}`}
-              >
-                <td className="whitespace-nowrap px-4 py-3">
-                  {dayKey(b.start_time) === today ? (
+    <>
+      <div className="mt-3 space-y-2.5 lg:hidden">
+        {rows.map((b) => (
+          <BookingMobileRow
+            key={b.uri}
+            b={b}
+            color={colorFor(b.event_type)}
+            today={today}
+            active={activeUri === b.uri}
+            onOpen={() => onOpenDetail(b.uri)}
+          />
+        ))}
+      </div>
+      <div className="mt-4 hidden overflow-x-auto rounded-2xl border border-eoe-espresso/10 bg-white shadow-sm lg:block">
+        <table className="w-full min-w-[720px] text-left text-sm">
+          <thead className="bg-eoe-ivory text-[10px] uppercase tracking-[0.18em] text-eoe-espresso/70">
+            <tr>
+              <th className="px-4 py-3 font-medium">Date</th>
+              <th className="px-4 py-3 font-medium">Time</th>
+              <th className="px-4 py-3 font-medium">Experience</th>
+              <th className="px-4 py-3 font-medium">Guest</th>
+              <th className="px-4 py-3 font-medium">Pax</th>
+              <th className="px-4 py-3 font-medium">Payment</th>
+              <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((b) => {
+              const st = statusOf(b);
+              const cancelled = b.status === "canceled";
+              return (
+                <tr
+                  key={b.uri}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onOpenDetail(b.uri)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onOpenDetail(b.uri);
+                    }
+                  }}
+                  className={`cursor-pointer border-t border-eoe-espresso/8 transition hover:bg-eoe-ivory/80 ${
+                    cancelled ? "text-eoe-espresso/70" : "text-eoe-ink"
+                  } ${activeUri === b.uri ? "bg-eoe-gold/10" : ""}`}
+                >
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {dayKey(b.start_time) === today ? (
+                      <span
+                        className="font-semibold"
+                        style={{ color: GOLD_TEXT }}
+                      >
+                        Today
+                      </span>
+                    ) : (
+                      shortDay(dayKey(b.start_time))
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {timeOf(b.start_time)}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="flex items-center gap-2">
+                      <span
+                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: colorFor(b.event_type) }}
+                      />
+                      {b.name}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div>{b.invitee.name}</div>
+                    <div className="text-xs text-eoe-espresso/70">
+                      {displayEmail(b.invitee.email) ||
+                        b.invitee.phone ||
+                        "Tap to edit"}
+                    </div>
+                    <SpecialRequestBanner text={b.special_request} compact />
+                  </td>
+                  <td className="px-4 py-3">
+                    {b.guests}
+                    {b.cars != null && b.cars > 0 ? (
+                      <span className="block text-[11px] text-eoe-espresso/70">
+                        {b.cars} {b.cars === 1 ? "car" : "cars"}
+                        {b.car_labels?.length
+                          ? ` · ${b.car_labels.join(", ")}`
+                          : ""}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {b.payment_status === "paid" ||
+                    b.payment_status === "partially_paid"
+                      ? money(b.payment_amount_cents)
+                      : b.pay_on_arrival
+                        ? "At restaurant"
+                        : "n/a"}
+                  </td>
+                  <td className="px-4 py-3">
                     <span
-                      className="font-semibold"
-                      style={{ color: GOLD_TEXT }}
+                      className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${st.cls}`}
                     >
-                      Today
+                      {st.label}
                     </span>
-                  ) : (
-                    shortDay(dayKey(b.start_time))
-                  )}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3">
-                  {timeOf(b.start_time)}
-                </td>
-                <td className="px-4 py-3">
-                  <span className="flex items-center gap-2">
-                    <span
-                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: colorFor(b.event_type) }}
-                    />
-                    {b.name}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <div>{b.invitee.name}</div>
-                  <div className="text-xs text-eoe-espresso/70">
-                    {displayEmail(b.invitee.email) ||
-                      b.invitee.phone ||
-                      "Tap to edit"}
-                  </div>
-                  <SpecialRequestBanner text={b.special_request} compact />
-                </td>
-                <td className="px-4 py-3">
-                  {b.guests}
-                  {b.cars != null && b.cars > 0 ? (
-                    <span className="block text-[11px] text-eoe-espresso/70">
-                      {b.cars} {b.cars === 1 ? "car" : "cars"}
-                      {b.car_labels?.length
-                        ? ` · ${b.car_labels.join(", ")}`
-                        : ""}
+                    {st.age && (
+                      <span
+                        className={`mt-1 block text-[11px] ${
+                          st.stale
+                            ? "font-medium text-rose-600"
+                            : "text-eoe-espresso/70"
+                        }`}
+                      >
+                        {st.age}
+                      </span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <span className="text-[11px] uppercase tracking-[0.14em] text-eoe-espresso/70">
+                      Edit
                     </span>
-                  ) : null}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3">
-                  {b.payment_status === "paid" ||
-                  b.payment_status === "partially_paid"
-                    ? money(b.payment_amount_cents)
-                    : b.pay_on_arrival
-                      ? "At restaurant"
-                      : "n/a"}
-                </td>
-                <td className="px-4 py-3">
-                  <span
-                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${st.cls}`}
-                  >
-                    {st.label}
-                  </span>
-                  {st.age && (
-                    <span
-                      className={`mt-1 block text-[11px] ${
-                        st.stale
-                          ? "font-medium text-rose-600"
-                          : "text-eoe-espresso/70"
-                      }`}
-                    >
-                      {st.age}
-                    </span>
-                  )}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 text-right">
-                  <span className="text-[11px] uppercase tracking-[0.14em] text-eoe-espresso/70">
-                    Edit
-                  </span>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
@@ -3300,38 +3688,39 @@ function BookingDetailModal({
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-labelledby="booking-detail-title"
-        className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-eoe-espresso/10 bg-white p-5 shadow-2xl sm:rounded-3xl sm:p-7"
+        className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-eoe-espresso/10 bg-white shadow-2xl sm:max-h-[min(92vh,52rem)] sm:rounded-3xl"
       >
-        <div className="flex items-start justify-between gap-4">
-          <div>
+        <div className="flex items-start justify-between gap-4 border-b border-eoe-espresso/8 px-4 py-4 sm:px-7 sm:pt-7 sm:pb-4">
+          <div className="min-w-0">
             <p className="text-[11px] uppercase tracking-[0.2em] text-eoe-espresso/75">
               Booking details
             </p>
             <h2
               id="booking-detail-title"
-              className="mt-1 font-display text-2xl tracking-wide text-eoe-espresso"
+              className="mt-1 truncate font-display text-xl tracking-wide text-eoe-espresso sm:text-2xl"
             >
               {b.invitee.name}
             </h2>
             <p className="mt-1 flex items-center gap-2 text-sm text-eoe-ink">
               <span
-                className="inline-block h-2.5 w-2.5 rounded-full"
+                className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
                 style={{ backgroundColor: color }}
               />
-              {b.name}
+              <span className="truncate">{b.name}</span>
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full px-2 text-lg leading-none text-eoe-espresso/70 hover:text-eoe-espresso"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-eoe-espresso/15 text-xl leading-none text-eoe-espresso/70 hover:bg-eoe-ivory hover:text-eoe-espresso"
             aria-label="Close"
           >
             ×
           </button>
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center gap-2">
+        <div className="overflow-y-auto overscroll-contain px-4 py-4 sm:px-7 sm:pb-7">
+        <div className="flex flex-wrap items-center gap-2">
           <span
             className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-wide ${st.cls}`}
           >
@@ -3667,14 +4056,14 @@ function BookingDetailModal({
                   type="button"
                   onClick={doRelease}
                   disabled={busy}
-                  className="rounded-full bg-rose-100 px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-rose-700 hover:bg-rose-200 disabled:opacity-50"
+                  className="min-h-11 rounded-full bg-rose-100 px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-rose-700 hover:bg-rose-200 disabled:opacity-50"
                 >
                   {busy ? "…" : "Confirm release"}
                 </button>
                 <button
                   type="button"
                   onClick={() => setReleasing(false)}
-                  className="text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/70 hover:text-eoe-espresso"
+                  className="min-h-11 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/70 hover:text-eoe-espresso"
                 >
                   Keep hold
                 </button>
@@ -3683,48 +4072,9 @@ function BookingDetailModal({
               <button
                 type="button"
                 onClick={() => setReleasing(true)}
-                className="mt-3 rounded-full border border-amber-300 bg-white px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-amber-900 hover:bg-amber-100"
+                className="mt-3 min-h-11 rounded-full border border-amber-300 bg-white px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-amber-900 hover:bg-amber-100"
               >
                 Release hold
-              </button>
-            )}
-          </div>
-        )}
-
-        {!cancelled && (
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={() => setRescheduling((v) => !v)}
-              className="rounded-full border border-eoe-espresso/20 px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/85 hover:bg-eoe-espresso/5"
-            >
-              {rescheduling ? "Hide reschedule" : "Reschedule"}
-            </button>
-            {confirming ? (
-              <span className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={doCancel}
-                  disabled={busy}
-                  className="rounded-full bg-rose-100 px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-rose-700 hover:bg-rose-200 disabled:opacity-50"
-                >
-                  {busy ? "…" : "Confirm cancel"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirming(false)}
-                  className="text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/70 hover:text-eoe-espresso"
-                >
-                  Keep
-                </button>
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setConfirming(true)}
-                className="rounded-full border border-eoe-espresso/20 px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/85 hover:bg-eoe-espresso/5"
-              >
-                Cancel booking
               </button>
             )}
           </div>
@@ -3740,6 +4090,46 @@ function BookingDetailModal({
               onClose();
             }}
           />
+        )}
+        </div>
+
+        {!cancelled && (
+          <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-2 border-t border-eoe-espresso/10 bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-7">
+            <button
+              type="button"
+              onClick={() => setRescheduling((v) => !v)}
+              className="min-h-11 flex-1 rounded-full border border-eoe-espresso/20 px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso hover:bg-eoe-espresso/5 sm:flex-none"
+            >
+              {rescheduling ? "Hide move" : "Reschedule"}
+            </button>
+            {confirming ? (
+              <span className="flex flex-1 items-center justify-end gap-2 sm:flex-none">
+                <button
+                  type="button"
+                  onClick={doCancel}
+                  disabled={busy}
+                  className="min-h-11 rounded-full bg-rose-100 px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-rose-700 hover:bg-rose-200 disabled:opacity-50"
+                >
+                  {busy ? "…" : "Confirm cancel"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(false)}
+                  className="min-h-11 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/70 hover:text-eoe-espresso"
+                >
+                  Keep
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirming(true)}
+                className="min-h-11 flex-1 rounded-full border border-eoe-espresso/20 px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso hover:bg-eoe-espresso/5 sm:flex-none"
+              >
+                Cancel booking
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

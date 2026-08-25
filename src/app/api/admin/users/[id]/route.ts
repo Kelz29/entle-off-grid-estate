@@ -38,13 +38,25 @@ export async function PATCH(
       { status: 422 }
     );
   }
+  if (body.password != null && typeof body.password !== "string") {
+    return NextResponse.json({ detail: "Invalid password" }, { status: 422 });
+  }
+  if (typeof body.password === "string" && body.password.length > 0 && body.password.length < 8) {
+    return NextResponse.json(
+      { detail: "Password must be at least 8 characters" },
+      { status: 422 }
+    );
+  }
 
   try {
     const user = await updateAdminUser(id, {
       displayName: body.display_name,
       role: body.role && isAdminRole(body.role) ? body.role : undefined,
       isActive: body.is_active,
-      password: body.password,
+      password:
+        typeof body.password === "string" && body.password.length > 0
+          ? body.password
+          : undefined,
     });
     if (!user) {
       return NextResponse.json({ detail: "User not found" }, { status: 404 });

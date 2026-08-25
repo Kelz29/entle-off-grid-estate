@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { reels } from "@/lib/media";
 import { HoverVideo } from "@/components/ui/HoverVideo";
 import { Lightbox, type MediaItem } from "@/components/ui/Lightbox";
+import { MobileScrollStrip, mobileScrollSlide } from "@/components/ui/MobileScrollStrip";
 
 export function Experiences() {
   const [active, setActive] = useState<MediaItem | null>(null);
@@ -36,7 +37,10 @@ export function Experiences() {
 
       {/* Reels — horizontal scroll of portrait videos */}
       <div className="mx-auto max-w-[1400px]">
-        <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto px-1 pb-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:gap-5">
+        <MobileScrollStrip
+          outerClassName="md:left-auto md:w-full md:max-w-none md:translate-x-0 md:pl-0 md:px-1"
+          trackClassName="md:gap-5 md:pr-1"
+        >
           {reels.map((reel, index) => (
             <motion.button
               key={reel.src}
@@ -46,7 +50,7 @@ export function Experiences() {
               viewport={{ once: true, amount: 0.2 }}
               transition={{ duration: 0.6, ease: "easeOut", delay: index * 0.05 }}
               onClick={() => setActive({ type: "video", src: reel.src, caption: reel.title })}
-              className="group relative w-[220px] shrink-0 snap-start text-left sm:w-[250px] md:w-[280px]"
+              className={`group relative text-left ${mobileScrollSlide} sm:w-[250px] md:w-[280px] md:shrink-0`}
             >
               <HoverVideo
                 src={reel.src}
@@ -67,7 +71,7 @@ export function Experiences() {
               </HoverVideo>
             </motion.button>
           ))}
-        </div>
+        </MobileScrollStrip>
       </div>
 
       <Lightbox item={active} onClose={() => setActive(null)} />

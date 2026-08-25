@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import Image from "next/image";
 import { spaces } from "@/lib/media";
+import { MobileScrollStrip, mobileScrollSlide } from "@/components/ui/MobileScrollStrip";
 
 export function Spaces() {
   return (
@@ -26,7 +27,10 @@ export function Spaces() {
           </p>
         </div>
 
-        <div className="flex gap-5 overflow-x-auto pb-4 md:grid md:grid-cols-3 md:gap-6 md:overflow-visible">
+        <MobileScrollStrip
+          outerClassName="md:left-auto md:w-full md:max-w-none md:translate-x-0 md:overflow-visible md:pl-0"
+          trackClassName="gap-5 md:grid md:w-full md:max-w-none md:grid-cols-3 md:gap-6 md:snap-none md:pr-0 md:pb-0"
+        >
           {spaces.map((space, index) => (
             <motion.article
               key={space.title}
@@ -34,7 +38,7 @@ export function Spaces() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, amount: 0.3 }}
               transition={{ duration: 0.7, ease: "easeOut", delay: index * 0.08 }}
-              className="group relative min-w-[260px] overflow-hidden rounded-3xl border border-eoe-espresso/10"
+              className={`group relative overflow-hidden rounded-3xl border border-eoe-espresso/10 ${mobileScrollSlide} md:min-w-0`}
             >
               <div className="relative aspect-[3/4] overflow-hidden">
                 <Image
@@ -66,7 +70,7 @@ export function Spaces() {
               </div>
             </motion.article>
           ))}
-        </div>
+        </MobileScrollStrip>
       </div>
     </section>
   );

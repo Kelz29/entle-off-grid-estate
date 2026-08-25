@@ -214,6 +214,35 @@ export async function deleteAdminUser(id: number): Promise<boolean> {
   return rowCount > 0;
 }
 
+export async function changeOwnPassword(input: {
+  username: string;
+  currentPassword: string;
+  newPassword: string;
+}): Promise<void> {
+  const user = await findAdminUserByUsername(input.username);
+  if (!user || !user.is_active) {
+    throw new Error(
+      "This account uses the env owner login. Change ADMIN_PASSWORD in the server environment instead."
+    );
+  }
+  const ok = await verifyPasswordHash(
+    input.currentPassword,
+    user.password_hash
+  );
+  if (!ok) throw new Error("Current password is incorrect");
+  if (input.newPassword.length < 8) {
+    throw new Error("New password must be at least 8 characters");
+  }
+  if (input.currentPassword === input.newPassword) {
+    throw new Error("New password must be different from the current one");
+  }
+  const hash = await hashPassword(input.newPassword);
+  await query(
+    `UPDATE admin_users SET password_hash = $2, updated_at = NOW(3) WHERE id = $1`,
+    [user.id, hash]
+  );
+}
+
 export async function authenticateDbUser(
   username: string,
   password: string
@@ -228,3 +257,4 @@ export async function authenticateDbUser(
     displayName: user.display_name,
   };
 }
+
