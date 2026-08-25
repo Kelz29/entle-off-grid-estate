@@ -3,20 +3,24 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
+import { trackEvent } from "@/lib/analytics";
 
 // Shared UI for the cancel / failure return pages. On mount it releases the
 // pending unpaid hold using the HMAC token issued at checkout.
 export function ReleaseNotice({
   title,
   message,
+  outcome,
 }: {
   title: string;
   message: string;
+  outcome: "cancelled" | "failed";
 }) {
   const params = useParams<{ bookingId?: string }>();
   const search = useSearchParams();
 
   useEffect(() => {
+    trackEvent(outcome === "cancelled" ? "Booking Cancelled" : "Booking Failed");
     const idFromPath =
       typeof params.bookingId === "string" ? params.bookingId : null;
     const id = idFromPath ?? search.get("booking");
@@ -27,7 +31,7 @@ export function ReleaseNotice({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ bookingId: id, token }),
     }).catch(() => {});
-  }, [params.bookingId, search]);
+  }, [params.bookingId, search, outcome]);
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-eoe-ivory px-4">

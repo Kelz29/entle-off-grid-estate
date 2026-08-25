@@ -20,6 +20,7 @@ import {
   normalizeEmail,
   phoneError,
 } from "@/lib/contact-validation";
+import { AnalyticsEvents, trackEvent } from "@/lib/analytics";
 
 const BUSINESS_ID = process.env.NEXT_PUBLIC_BUSINESS_ID ?? "1";
 const DEFAULT_CAR_TYPE: CarTypeId = "sedan";
@@ -204,6 +205,11 @@ export function Booking() {
     }
     setError(null);
     setConfirmPay(true);
+    trackEvent(AnalyticsEvents.BookingPayIntent, {
+      service: service.name,
+      guests: guestCount,
+      amount_cents: depositTotal,
+    });
   };
 
   const startCheckout = async () => {
@@ -211,6 +217,11 @@ export function Booking() {
     setConfirmPay(false);
     setSubmitting(true);
     setError(null);
+    trackEvent(AnalyticsEvents.BookingCheckoutStarted, {
+      service: service.name,
+      guests: guestCount,
+      amount_cents: depositTotal,
+    });
 
     // Reserve the slot + create a Yoco checkout, then hand off to Yoco's
     // hosted payment page. Confirmation happens on return via webhook.
@@ -232,6 +243,10 @@ export function Booking() {
         }),
       });
       if (res.status === 409) {
+        trackEvent(AnalyticsEvents.BookingCheckoutFailed, {
+          reason: "slot_taken",
+          service: service.name,
+        });
         setError("That time was just taken. Please pick another slot.");
         setStep("slot");
         if (service && date) loadSlots(service, date);
@@ -239,18 +254,36 @@ export function Booking() {
         return;
       }
       if (res.status === 429) {
+        trackEvent(AnalyticsEvents.BookingCheckoutFailed, {
+          reason: "rate_limited",
+          service: service.name,
+        });
         setError("Too many attempts. Please wait a moment and try again.");
         setSubmitting(false);
         return;
       }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
+        trackEvent(AnalyticsEvents.BookingCheckoutFailed, {
+          reason: "checkout_error",
+          status: res.status,
+          service: service.name,
+        });
         throw new Error(body.detail ?? "Unable to start payment.");
       }
       const { redirectUrl } = await res.json();
       if (!redirectUrl || typeof redirectUrl !== "string") {
+        trackEvent(AnalyticsEvents.BookingCheckoutFailed, {
+          reason: "missing_redirect",
+          service: service.name,
+        });
         throw new Error("Unable to start payment.");
       }
+      trackEvent(AnalyticsEvents.BookingRedirectYoco, {
+        service: service.name,
+        guests: guestCount,
+        amount_cents: depositTotal,
+      });
       window.location.href = redirectUrl; // → Yoco hosted checkout
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -364,6 +397,11 @@ export function Booking() {
                     setCarTypes([DEFAULT_CAR_TYPE]);
                     setError(null);
                     setStep("slot");
+                    trackEvent(AnalyticsEvents.BookingExperienceSelected, {
+                      service: s.name,
+                      slug: s.slug,
+                      price_cents: s.price_cents,
+                    });
                   }}
                 />
               )}
@@ -375,12 +413,23 @@ export function Booking() {
                   slots={slots}
                   loading={slotsLoading}
                   selected={slot}
-                  onSelectSlot={setSlot}
+                  onSelectSlot={(s) => {
+                    setSlot(s);
+                    trackEvent(AnalyticsEvents.BookingSlotSelected, {
+                      service: service.name,
+                      start_time: s.start_time,
+                    });
+                  }}
                   onBack={() => {
                     setStep("service");
                     setSlot(null);
                   }}
-                  onNext={() => setStep("details")}
+                  onNext={() => {
+                    setStep("details");
+                    trackEvent(AnalyticsEvents.BookingDetailsOpened, {
+                      service: service.name,
+                    });
+                  }}
                 />
               )}
 

@@ -8,6 +8,10 @@ import {
 } from "@/lib/calendly/repository";
 import { parseBookingId } from "@/lib/calendly/booking-id";
 import { sendBookingConfirmation } from "@/lib/email";
+import {
+  ServerAnalyticsEvents,
+  trackServerEvent,
+} from "@/lib/analytics-server";
 
 /**
  * Yoco webhook receiver. Verifies the Svix-style signature over the RAW body,
@@ -64,6 +68,9 @@ export async function POST(request: Request) {
       const newlyPaid = await markBookingPaid(bookingId, paymentId, amount);
       // Send the confirmation email once, only on the first successful payment.
       if (newlyPaid) {
+        await trackServerEvent(ServerAnalyticsEvents.PaymentSucceeded, {
+          amount_cents: amount,
+        });
         const booking = await getBooking(bookingId);
         const business = booking && (await getActiveBusiness(booking.business_id));
         if (booking && business) await sendBookingConfirmation(booking, business);

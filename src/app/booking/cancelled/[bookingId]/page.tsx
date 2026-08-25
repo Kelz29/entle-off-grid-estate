@@ -7,6 +7,7 @@ export default function BookingCancelledPage() {
       <ReleaseNotice
         title="Booking cancelled"
         message="You cancelled the payment, so nothing was charged and the time slot has been released. You're welcome to start again whenever you're ready."
+        outcome="cancelled"
       />
     </Suspense>
   );

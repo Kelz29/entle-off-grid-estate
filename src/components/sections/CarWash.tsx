@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { CAR_WASH_INFO, formatZar } from "@/lib/menu";
+import { AnalyticsEvents, trackEvent } from "@/lib/analytics";
 
 function CarIcon({ kind }: { kind: "small" | "medium" | "large" }) {
   const w = kind === "small" ? 40 : kind === "medium" ? 48 : 56;
@@ -153,12 +154,18 @@ export function CarWash({ asPage = false }: { asPage?: boolean }) {
           <div className="flex flex-wrap gap-3">
             <Link
               href="/#booking"
+              onClick={() =>
+                trackEvent(AnalyticsEvents.CtaBook, { source: "car_wash" })
+              }
               className="inline-flex min-h-11 shrink-0 rounded-full bg-eoe-espresso px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-ivory hover:bg-eoe-espresso/90"
             >
               Book café + wash
             </Link>
             <Link
               href="/menu"
+              onClick={() =>
+                trackEvent(AnalyticsEvents.CtaMenu, { source: "car_wash" })
+              }
               className="inline-flex min-h-11 shrink-0 rounded-full border border-eoe-espresso/25 px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-espresso hover:bg-eoe-espresso/5"
             >
               See the menu

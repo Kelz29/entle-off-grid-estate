@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import { AnalyticsEvents, trackEvent } from "@/lib/analytics";
 
 const REDIRECT_SECONDS = 15;
 const HOME_HREF = "/#booking";
@@ -44,6 +45,7 @@ export default function BookingSuccessPage() {
   const [paid, setPaid] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  const trackedOutcome = useRef(false);
 
   const settled = paid || timedOut;
 
@@ -98,6 +100,16 @@ export default function BookingSuccessPage() {
   // After any terminal status, count down then return to the site.
   useEffect(() => {
     if (!settled) return;
+    if (!trackedOutcome.current) {
+      trackedOutcome.current = true;
+      if (paid) {
+        trackEvent(AnalyticsEvents.BookingPaymentReceived, {
+          amount_cents: booking?.payment_amount_cents ?? null,
+        });
+      } else {
+        trackEvent(AnalyticsEvents.BookingPaymentPending);
+      }
+    }
     setSecondsLeft(REDIRECT_SECONDS);
     const tick = setInterval(() => {
       setSecondsLeft((prev) => {
@@ -109,7 +121,7 @@ export default function BookingSuccessPage() {
       });
     }, 1000);
     return () => clearInterval(tick);
-  }, [settled]);
+  }, [settled, paid, booking?.payment_amount_cents]);
 
   useEffect(() => {
     if (secondsLeft !== 0) return;
@@ -158,7 +170,7 @@ export default function BookingSuccessPage() {
       )}
       {settled && secondsLeft != null && (
         <p className="mt-4 text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/70">
-          Returning to the site in {secondsLeft}s
+          Returning to the site in {secondsLeft} seconds
         </p>
       )}
       <HomeLink />

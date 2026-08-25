@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
 import { hero } from "@/lib/media";
+import { AnalyticsEvents, trackEvent } from "@/lib/analytics";
 
 export function Hero() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -113,12 +114,18 @@ export function Hero() {
         >
           <a
             href="#booking"
+            onClick={() =>
+              trackEvent(AnalyticsEvents.CtaBook, { source: "hero" })
+            }
             className="rounded-full border border-eoe-gold bg-eoe-gold px-6 py-3 text-xs font-semibold tracking-[0.22em] text-eoe-ivory hover:bg-eoe-gold/90"
           >
             BOOK A DATE
           </a>
           <a
             href="#estate"
+            onClick={() =>
+              trackEvent(AnalyticsEvents.CtaExplore, { source: "hero" })
+            }
             className="rounded-full border border-eoe-ivory/40 px-6 py-3 text-xs font-semibold tracking-[0.22em] text-eoe-ivory/90 hover:bg-eoe-ivory/5"
           >
             EXPLORE THE ESTATE

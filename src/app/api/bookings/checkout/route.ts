@@ -26,66 +26,11 @@ import {
   isValidPhone,
   normalizeEmail,
 } from "@/lib/contact-validation";
-
-const APP_BASE_URL =
-  process.env.APP_BASE_URL?.replace(/\/$/, "") ?? "http://localhost:3000";
-
-/**
- * Hosts allowed for Yoco success/cancel/failure redirect bases.
- * Comma-separated ALLOWED_REDIRECT_HOSTS plus APP_BASE_URL host and localhost.
- */
-function allowedRedirectHosts(): Set<string> {
-  const hosts = new Set<string>();
-  const add = (h: string | null | undefined) => {
-    const v = h?.trim().toLowerCase();
-    if (v) hosts.add(v.split(":")[0] ?? v); // compare hostname without port optionally
-    if (v) hosts.add(v); // also keep host:port form
-  };
-  add("localhost");
-  add("127.0.0.1");
-  try {
-    add(new URL(APP_BASE_URL).host);
-  } catch {
-    /* ignore */
-  }
-  const extra = process.env.ALLOWED_REDIRECT_HOSTS ?? "";
-  for (const part of extra.split(",")) add(part);
-  return hosts;
-}
-
-function hostAllowed(host: string): boolean {
-  const h = host.trim().toLowerCase();
-  const allowed = allowedRedirectHosts();
-  if (allowed.has(h)) return true;
-  const bare = h.split(":")[0] ?? h;
-  if (allowed.has(bare)) return true;
-  // Allow any localhost port
-  if (bare === "localhost" || bare === "127.0.0.1") return true;
-  return false;
-}
-
-/**
- * Origin the customer's browser is actually on (localhost vs tunnel),
- * constrained to ALLOWED_REDIRECT_HOSTS so open redirects can't poison Yoco URLs.
- * Prefer x-forwarded-host when allowlisted; otherwise fall back to Host before APP_BASE_URL.
- */
-function requestOrigin(request: Request): string {
-  const candidates = [
-    request.headers.get("x-forwarded-host"),
-    request.headers.get("host"),
-  ].filter((h): h is string => Boolean(h?.trim()));
-
-  for (const host of candidates) {
-    if (!hostAllowed(host)) continue;
-    const proto =
-      request.headers.get("x-forwarded-proto") ??
-      (host.startsWith("localhost") || host.startsWith("127.0.0.1")
-        ? "http"
-        : "https");
-    return `${proto}://${host}`;
-  }
-  return APP_BASE_URL;
-}
+import {
+  ServerAnalyticsEvents,
+  trackServerEvent,
+} from "@/lib/analytics-server";
+import { checkoutReturnOrigin } from "@/lib/checkout-return-origin";
 
 /**
  * Start a paid booking (Yoco hosted Checkout). Sequence:
@@ -197,9 +142,9 @@ export async function POST(request: Request) {
   }
 
   // 2. Create the hosted checkout. Cancel/fail URLs carry an HMAC release token.
-  // Path-based return URLs (not ?booking=) — Yoco/query rewrites have dropped
-  // query params for some merchants, which broke the success page.
-  const baseUrl = requestOrigin(request);
+  // Path-based return URLs. Origin comes from the browser (same-origin),
+  // not a hardcoded APP_BASE_URL — that was sending production payers to localhost.
+  const baseUrl = checkoutReturnOrigin(request);
   let releaseToken: string;
   try {
     releaseToken = await createReleaseToken(bookingId);
@@ -229,6 +174,11 @@ export async function POST(request: Request) {
       },
     });
     await setCheckoutId(bookingId, checkout.id);
+    await trackServerEvent(ServerAnalyticsEvents.CheckoutCreated, {
+      service_id: service.id,
+      amount_cents: amountInCents,
+      guests,
+    });
     return NextResponse.json(
       {
         redirectUrl: checkout.redirectUrl,
@@ -242,6 +192,10 @@ export async function POST(request: Request) {
     await releaseUnpaidBooking(bookingId).catch(() => {});
     const message =
       err instanceof YocoError ? err.message : "Could not start payment";
+    await trackServerEvent(ServerAnalyticsEvents.CheckoutYocoFailed, {
+      service_id: service.id,
+      amount_cents: amountInCents,
+    });
     return NextResponse.json({ detail: message }, { status: 502 });
   }
 }

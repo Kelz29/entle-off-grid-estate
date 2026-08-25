@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { AnalyticsEvents, trackEvent } from "@/lib/analytics";
 
 type NavItem = { href: string; label: string };
 
@@ -111,6 +112,9 @@ export function SiteHeader() {
         <div className="ml-auto flex shrink-0 items-center gap-2 lg:ml-0">
           <Link
             href={bookHref}
+            onClick={() =>
+              trackEvent(AnalyticsEvents.CtaBook, { source: "header" })
+            }
             className="rounded-full border border-eoe-gold/70 bg-eoe-gold/10 px-3 py-2 text-[10px] font-medium text-eoe-espresso hover:bg-eoe-gold/20 sm:px-4 sm:text-[11px]"
           >
             Book a Date
@@ -149,7 +153,12 @@ export function SiteHeader() {
               ))}
               <Link
                 href="/car-wash"
-                onClick={() => setMenuOpen(false)}
+                onClick={() => {
+                  setMenuOpen(false);
+                  trackEvent(AnalyticsEvents.CtaCarWash, {
+                    source: "header_mobile",
+                  });
+                }}
                 className="mt-1 rounded-full border border-eoe-espresso/10 px-4 py-2.5 text-[11px] text-eoe-espresso/85 hover:bg-eoe-espresso/5"
               >
                 Car wash

@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { AnalyticsEvents, trackEvent } from "@/lib/analytics";
 
 export function Contact() {
   return (
@@ -36,7 +37,12 @@ export function Contact() {
                 Phone
               </p>
               <p className="mt-1 text-eoe-ivory">
-                <a href="tel:+27673662302">067 366 2302</a>
+                <a
+                  href="tel:+27673662302"
+                  onClick={() => trackEvent(AnalyticsEvents.ContactPhone)}
+                >
+                  067 366 2302
+                </a>
               </p>
             </div>
             <div>
@@ -48,6 +54,7 @@ export function Contact() {
                   href="https://instagram.com/entle_off_grid_estate"
                   target="_blank"
                   rel="noreferrer"
+                  onClick={() => trackEvent(AnalyticsEvents.ContactInstagram)}
                   className="underline-offset-4 hover:underline"
                 >
                   @entle_off_grid_estate
@@ -76,6 +83,7 @@ export function Contact() {
               href="https://maps.google.com/?q=183+Lakeview,+Bloemfontein,+South+Africa"
               target="_blank"
               rel="noreferrer"
+              onClick={() => trackEvent(AnalyticsEvents.ContactMaps)}
               className="block h-40 w-full overflow-hidden rounded-2xl border border-eoe-ivory/20 bg-eoe-ink/70 text-[11px] text-eoe-ivory/90 transition hover:border-eoe-gold/50"
             >
               <span className="flex h-full items-center justify-center px-4 text-center underline-offset-4 hover:underline">
@@ -92,23 +100,36 @@ export function Contact() {
               aria-label="Explore"
               className="flex flex-wrap gap-x-4 gap-y-1 uppercase tracking-[0.16em]"
             >
-              <a href="/menu" className="hover:text-eoe-ivory hover:underline">
+              <a
+                href="/menu"
+                onClick={() =>
+                  trackEvent(AnalyticsEvents.CtaMenu, { source: "footer" })
+                }
+                className="hover:text-eoe-ivory hover:underline"
+              >
                 Menu
               </a>
               <a
                 href="/car-wash"
+                onClick={() =>
+                  trackEvent(AnalyticsEvents.CtaCarWash, { source: "footer" })
+                }
                 className="hover:text-eoe-ivory hover:underline"
               >
                 Car wash
               </a>
               <a
                 href="/#booking"
+                onClick={() =>
+                  trackEvent(AnalyticsEvents.CtaBook, { source: "footer" })
+                }
                 className="hover:text-eoe-ivory hover:underline"
               >
                 Book
               </a>
               <a
                 href="/admin/login"
+                onClick={() => trackEvent(AnalyticsEvents.StaffLogin)}
                 className="hover:text-eoe-ivory hover:underline"
               >
                 Staff

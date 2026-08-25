@@ -4,6 +4,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import Image from "next/image";
 import { foodPhoto } from "@/lib/media";
+import { AnalyticsEvents, trackEvent } from "@/lib/analytics";
 
 /** Home teaser for The Table — full menu lives on /menu. */
 export function Food() {
@@ -48,12 +49,18 @@ export function Food() {
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
                 href="/menu"
+                onClick={() =>
+                  trackEvent(AnalyticsEvents.CtaMenu, { source: "food" })
+                }
                 className="inline-flex rounded-full border border-eoe-gold bg-eoe-gold px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-ivory hover:bg-eoe-gold/90"
               >
                 View the menu
               </Link>
               <Link
                 href="/car-wash"
+                onClick={() =>
+                  trackEvent(AnalyticsEvents.CtaCarWash, { source: "food" })
+                }
                 className="inline-flex rounded-full border border-eoe-espresso/20 px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-espresso hover:bg-eoe-espresso/5"
               >
                 Car wash while you dine
