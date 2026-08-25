@@ -132,12 +132,28 @@ export function Booking() {
   useEffect(() => {
     let alive = true;
     fetch(`/api/v1/calendly/event_types?business_id=${BUSINESS_ID}&active=true`)
-      .then((r) => r.json())
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          throw new Error(
+            typeof data.detail === "string"
+              ? data.detail
+              : "Unable to load bookable spaces."
+          );
+        }
+        return data;
+      })
       .then((data) => {
         if (!alive) return;
         setServices(data.collection ?? []);
+        setServicesError(null);
       })
-      .catch(() => alive && setServicesError("Unable to load bookable spaces."));
+      .catch((err) => {
+        if (!alive) return;
+        setServicesError(
+          err instanceof Error ? err.message : "Unable to load bookable spaces."
+        );
+      });
     return () => {
       alive = false;
     };

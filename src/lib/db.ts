@@ -55,7 +55,9 @@ export function getPool(): Pool {
       password: requireEnv("MYSQL_PASSWORD"),
       database: requireEnv("MYSQL_DATABASE"),
       waitForConnections: true,
-      connectionLimit: 10,
+      connectionLimit: 5,
+      connectTimeout: 10_000,
+      enableKeepAlive: true,
       dateStrings: true,
       timezone: "Z",
     });
