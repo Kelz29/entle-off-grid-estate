@@ -8,7 +8,7 @@ VALUES (
   'Africa/Johannesburg',
   '183 Lakeview, Bloemfontein, South Africa',
   60,
-  '{"business_hours":{"0":null,"1":null,"2":null,"3":null,"4":{"start":"11:00","end":"18:00"},"5":{"start":"11:00","end":"18:00"},"6":{"start":"11:00","end":"18:00"}}}',
+  '{"business_hours":{"0":null,"1":null,"2":null,"3":null,"4":{"start":"11:00","end":"18:00"},"5":{"start":"11:00","end":"18:00"},"6":{"start":"11:00","end":"18:00"}},"cocktail_special":{"enabled":true,"eyebrow":"Now pouring · Friday & Sunday","image_src":"/specials/cocktail-friday-sunday.jpg","image_alt":"Entle Café cocktail special: buy one, get 50% off your second cocktail, Friday and Sunday 12:00 to 17:00","cta_label":"Book a table","cta_href":"#booking","image_data_url":null}}',
   1
 )
 ON DUPLICATE KEY UPDATE

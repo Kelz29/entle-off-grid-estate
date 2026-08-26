@@ -34,19 +34,24 @@ export default defineConfig({
   reporter: "list",
   timeout: 60_000,
   use: {
-    baseURL: "http://localhost:3000",
+    // Prefer an already-running estate app (e.g. yarn dev on :3001) via
+    // PLAYWRIGHT_BASE_URL — avoids latching onto an unrelated Next.js on :3000.
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: "yarn dev",
-    url: "http://localhost:3000",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    env: {
-      ...process.env,
-      RATE_LIMIT_DISABLED: "1",
-    },
-  },
+  webServer: process.env.PLAYWRIGHT_BASE_URL
+    ? undefined
+    : {
+        command: "yarn dev",
+        // Hit an estate-only route so we don't reuse a random Next.js on :3000.
+        url: "http://localhost:3000/api/specials/cocktail",
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+        env: {
+          ...process.env,
+          RATE_LIMIT_DISABLED: "1",
+        },
+      },
 });

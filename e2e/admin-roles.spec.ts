@@ -51,6 +51,9 @@ test.describe("admin roles", () => {
 
     const clients = await request.get("/api/admin/clients?business_id=1");
     expect(clients.status()).toBe(401);
+
+    const specials = await request.get("/api/admin/specials/cocktail");
+    expect(specials.status()).toBe(401);
   });
 
   test("staff UI hides users nav", async ({ page }) => {
@@ -73,5 +76,6 @@ test.describe("admin roles", () => {
     });
     await expect(page.getByText(/staff access/i)).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole("button", { name: /^users$/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^specials$/i })).toHaveCount(0);
   });
 });

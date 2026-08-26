@@ -173,7 +173,8 @@ const NAV: { id: AdminSection; label: string; hint: string }[] = [
   { id: "overview", label: "Overview", hint: "KPIs and load" },
   { id: "bookings", label: "Bookings", hint: "Agenda and table" },
   { id: "payments", label: "Payments", hint: "Deposits and dues" },
-  { id: "clients", label: "Clients", hint: "Emails and specials" },
+  { id: "clients", label: "Clients", hint: "Guest emails" },
+  { id: "specials", label: "Specials", hint: "Home invitation flyer" },
   { id: "seats", label: "Seats", hint: "Capacity and holds" },
   { id: "users", label: "Users", hint: "Staff accounts and roles" },
 ];
@@ -187,6 +188,7 @@ type MeResponse = {
     users: boolean;
     broadcast: boolean;
     seats: boolean;
+    specials: boolean;
     payments: boolean;
     clients: boolean;
   };
@@ -1039,6 +1041,10 @@ export default function AdminPage() {
 
           {section === "clients" && canAccessSection(role, "clients") && (
             <ClientsPanel canBroadcast={Boolean(me?.permissions?.broadcast)} />
+          )}
+
+          {section === "specials" && canAccessSection(role, "specials") && (
+            <SpecialsPanel />
           )}
 
           {section === "seats" && canAccessSection(role, "seats") && (
@@ -2435,6 +2441,280 @@ function NewBookingModal({
         </div>
       </form>
     </div>
+  );
+}
+
+// ---------- home cocktail special ----------
+type SpecialResource = {
+  enabled: boolean;
+  eyebrow: string;
+  image_src: string;
+  image_alt: string;
+  cta_label: string;
+  cta_href: string;
+  image_url: string;
+  has_upload: boolean;
+};
+
+function SpecialsPanel() {
+  const { data, error, isLoading, mutate } = useSWR<{ resource: SpecialResource }>(
+    "/api/admin/specials/cocktail",
+    fetcher
+  );
+  const resource = data?.resource;
+  const [enabled, setEnabled] = useState(true);
+  const [eyebrow, setEyebrow] = useState("");
+  const [imageAlt, setImageAlt] = useState("");
+  const [ctaLabel, setCtaLabel] = useState("");
+  const [ctaHref, setCtaHref] = useState("#booking");
+  const [imageSrc, setImageSrc] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [clearUpload, setClearUpload] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [previewBump, setPreviewBump] = useState(0);
+  const [localPreview, setLocalPreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!resource) return;
+    setEnabled(resource.enabled);
+    setEyebrow(resource.eyebrow);
+    setImageAlt(resource.image_alt);
+    setCtaLabel(resource.cta_label);
+    setCtaHref(resource.cta_href);
+    setImageSrc(resource.image_src);
+    setFile(null);
+    setClearUpload(false);
+  }, [resource]);
+
+  useEffect(() => {
+    if (!file) {
+      setLocalPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setLocalPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  const dirty =
+    !!resource &&
+    (enabled !== resource.enabled ||
+      eyebrow !== resource.eyebrow ||
+      imageAlt !== resource.image_alt ||
+      ctaLabel !== resource.cta_label ||
+      ctaHref !== resource.cta_href ||
+      imageSrc !== resource.image_src ||
+      file != null ||
+      clearUpload);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg(null);
+    try {
+      const form = new FormData();
+      form.set("enabled", enabled ? "true" : "false");
+      form.set("eyebrow", eyebrow);
+      form.set("image_alt", imageAlt);
+      form.set("cta_label", ctaLabel);
+      form.set("cta_href", ctaHref);
+      form.set("image_src", imageSrc);
+      if (clearUpload) form.set("clear_image_upload", "true");
+      if (file) form.set("image", file);
+      const res = await adminFetch("/api/admin/specials/cocktail", {
+        method: "PATCH",
+        body: form,
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg(d.detail ?? "Could not save");
+        return;
+      }
+      setMsg("Saved ✓");
+      setFile(null);
+      setClearUpload(false);
+      setPreviewBump((n) => n + 1);
+      await mutate();
+    } catch {
+      setMsg("Could not save");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const previewUrl = localPreview
+    ? localPreview
+    : clearUpload
+      ? imageSrc || "/specials/cocktail-friday-sunday.jpg"
+      : `${resource?.image_url ?? imageSrc}?v=${previewBump}`;
+
+  return (
+    <section className="rounded-2xl border border-eoe-espresso/12 bg-white px-5 py-4 shadow-sm">
+      <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/75">
+        Home invitation
+      </p>
+      <p className="mt-1 max-w-xl text-xs leading-relaxed text-eoe-espresso/75">
+        Controls the cocktail special that appears when guests open the website.
+        The eyebrow is the small line above the flyer; offer copy printed on the
+        poster itself only changes when you upload a new image. Turn it off
+        anytime, swap the flyer, or update the button.
+      </p>
+
+      {isLoading && (
+        <p className="mt-4 text-sm text-eoe-espresso/70">Loading…</p>
+      )}
+      {error && (
+        <p className="mt-4 text-sm text-red-700">Could not load special.</p>
+      )}
+
+      {resource && (
+        <form onSubmit={save} className="mt-5 grid gap-6 lg:grid-cols-[1fr_220px]">
+          <div className="space-y-4">
+            <label className="flex items-center gap-3 text-sm text-eoe-espresso">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+                className="size-4 rounded border-eoe-espresso/30"
+              />
+              Show on the website
+            </label>
+
+            <label className="block">
+              <span className="text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/70">
+                Eyebrow
+              </span>
+              <input
+                value={eyebrow}
+                onChange={(e) => setEyebrow(e.target.value)}
+                maxLength={120}
+                className="mt-1 w-full rounded-xl border border-eoe-espresso/15 bg-white px-3 py-2 text-sm text-eoe-espresso outline-none focus:border-eoe-gold"
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/70">
+                Image description (alt text)
+              </span>
+              <textarea
+                value={imageAlt}
+                onChange={(e) => setImageAlt(e.target.value)}
+                rows={3}
+                maxLength={400}
+                className="mt-1 w-full rounded-xl border border-eoe-espresso/15 bg-white px-3 py-2 text-sm text-eoe-espresso outline-none focus:border-eoe-gold"
+              />
+            </label>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/70">
+                  Button label
+                </span>
+                <input
+                  value={ctaLabel}
+                  onChange={(e) => setCtaLabel(e.target.value)}
+                  maxLength={80}
+                  className="mt-1 w-full rounded-xl border border-eoe-espresso/15 bg-white px-3 py-2 text-sm text-eoe-espresso outline-none focus:border-eoe-gold"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/70">
+                  Button link
+                </span>
+                <input
+                  value={ctaHref}
+                  onChange={(e) => setCtaHref(e.target.value)}
+                  maxLength={300}
+                  placeholder="#booking"
+                  className="mt-1 w-full rounded-xl border border-eoe-espresso/15 bg-white px-3 py-2 text-sm text-eoe-espresso outline-none focus:border-eoe-gold"
+                />
+              </label>
+            </div>
+
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/70">
+                Flyer image
+              </p>
+              <p className="mt-1 text-xs text-eoe-espresso/65">
+                Upload a new poster (JPEG/PNG/WebP, max 1.5&nbsp;MB), or keep the
+                default path below.
+              </p>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                onChange={(e) => {
+                  const next = e.target.files?.[0] ?? null;
+                  setFile(next);
+                  if (next) setClearUpload(false);
+                }}
+                className="mt-2 block w-full text-sm text-eoe-espresso file:mr-3 file:rounded-full file:border-0 file:bg-eoe-espresso file:px-3 file:py-1.5 file:text-[10px] file:uppercase file:tracking-[0.16em] file:text-eoe-ivory"
+              />
+              {(resource.has_upload || file) && !clearUpload && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFile(null);
+                    setClearUpload(true);
+                  }}
+                  className="mt-2 text-[10px] uppercase tracking-[0.16em] text-eoe-espresso/70 hover:text-eoe-espresso"
+                >
+                  Remove upload · use path
+                </button>
+              )}
+              <label className="mt-3 block">
+                <span className="text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/70">
+                  Fallback image path
+                </span>
+                <input
+                  value={imageSrc}
+                  onChange={(e) => setImageSrc(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-eoe-espresso/15 bg-white px-3 py-2 font-mono text-xs text-eoe-espresso outline-none focus:border-eoe-gold"
+                />
+              </label>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <button
+                type="submit"
+                disabled={busy || !dirty}
+                className="rounded-full bg-eoe-espresso px-5 py-2 text-[11px] uppercase tracking-[0.18em] text-eoe-ivory hover:bg-eoe-espresso/90 disabled:opacity-40"
+              >
+                {busy ? "Saving…" : "Save special"}
+              </button>
+              {msg && (
+                <span className="text-xs text-eoe-espresso/80">{msg}</span>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-eoe-espresso/70">
+              Preview
+            </p>
+            <div className="mt-2 overflow-hidden rounded-2xl border border-eoe-espresso/12 bg-[#2a1a12] p-3">
+              <p className="mb-2 text-center text-[9px] uppercase tracking-[0.24em] text-eoe-ivory/80">
+                {eyebrow || "—"}
+              </p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewUrl}
+                alt={imageAlt || "Special preview"}
+                className="mx-auto h-auto max-h-72 w-full object-contain"
+              />
+              <p className="mt-2 text-center text-[10px] uppercase tracking-[0.16em] text-eoe-ivory/90">
+                {ctaLabel || "—"}
+              </p>
+            </div>
+            {resource.has_upload && !clearUpload && !file && (
+              <p className="mt-2 text-[11px] text-eoe-espresso/65">
+                Using uploaded flyer
+              </p>
+            )}
+          </div>
+        </form>
+      )}
+    </section>
   );
 }
 

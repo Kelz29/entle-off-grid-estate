@@ -1,5 +1,15 @@
 // DB row shapes (snake_case as returned by pg).
 
+export interface CocktailSpecialSettings {
+  enabled?: boolean;
+  eyebrow?: string;
+  image_src?: string;
+  image_alt?: string;
+  cta_label?: string;
+  cta_href?: string;
+  image_data_url?: string | null;
+}
+
 export interface BusinessRow {
   id: number;
   name: string;
@@ -7,7 +17,10 @@ export interface BusinessRow {
   timezone: string;
   address: string | null;
   advance_booking_days: number;
-  settings: { business_hours?: Record<string, BusinessHours | null> };
+  settings: {
+    business_hours?: Record<string, BusinessHours | null>;
+    cocktail_special?: CocktailSpecialSettings;
+  };
   is_active: boolean;
   created_at: string;
 }

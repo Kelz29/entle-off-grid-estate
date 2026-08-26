@@ -4,29 +4,59 @@ import { useEffect, useId, useRef, useState } from "react";
 import Image from "next/image";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { AnalyticsEvents, trackEvent } from "@/lib/analytics";
+import {
+  fallbackCocktailSpecialResource,
+  type CocktailSpecialResource,
+} from "@/lib/cocktail-special-shared";
 
-const IMAGE_SRC = "/specials/cocktail-friday-sunday.jpg";
 const SHOW_DELAY_MS = 1600;
+
+function isLocalPublicPath(src: string): boolean {
+  return src.startsWith("/") && !src.startsWith("//");
+}
 
 /**
  * Soft “invitation” reveal for the café cocktail special.
- * Shows on home load / refresh only — no persistent reopen chip
- * (leaves the corner free for WhatsApp later).
+ * Config comes from /api/specials/cocktail (admin-editable).
+ * Shows on home load / refresh only — no persistent reopen chip.
  */
 export function CocktailSpecial() {
   const titleId = useId();
   const reduceMotion = useReducedMotion();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [config, setConfig] = useState<CocktailSpecialResource | null>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/specials/cocktail", {
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error("load failed");
+        const data = (await res.json()) as { resource?: CocktailSpecialResource };
+        if (cancelled) return;
+        if (data.resource) setConfig(data.resource);
+        else setConfig(fallbackCocktailSpecialResource());
+      } catch {
+        if (!cancelled) setConfig(fallbackCocktailSpecialResource());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!config?.enabled) return;
     const delay = reduceMotion ? 400 : SHOW_DELAY_MS;
     const t = window.setTimeout(() => {
       setOpen(true);
       trackEvent(AnalyticsEvents.SpecialShown, { kind: "cocktail" });
     }, delay);
     return () => window.clearTimeout(t);
-  }, [reduceMotion]);
+  }, [config, reduceMotion]);
 
   useEffect(() => {
     if (!open) return;
@@ -49,6 +79,11 @@ export function CocktailSpecial() {
     setOpen(false);
     trackEvent(AnalyticsEvents.SpecialDismissed, { kind: "cocktail" });
   };
+
+  if (!config?.enabled) return null;
+
+  const imageUrl = config.image_url || config.image_src;
+  const useNextImage = isLocalPublicPath(imageUrl);
 
   return (
     <AnimatePresence>
@@ -101,24 +136,35 @@ export function CocktailSpecial() {
               id={titleId}
               className="mb-2 shrink-0 text-center text-[10px] uppercase tracking-[0.28em] text-eoe-ivory/85 sm:mb-3 sm:tracking-[0.32em]"
             >
-              Now pouring · Friday &amp; Sunday
+              {config.eyebrow}
             </p>
 
             <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl shadow-[0_24px_64px_rgba(0,0,0,0.45)] ring-1 ring-eoe-ivory/20 sm:rounded-[1.75rem]">
-              <Image
-                src={IMAGE_SRC}
-                alt="Entle Café cocktail special: buy one, get 50% off your second cocktail, Friday and Sunday 12:00 to 17:00"
-                width={1080}
-                height={1350}
-                priority
-                className="mx-auto h-auto max-h-[min(68dvh,72svh)] w-full object-contain object-center sm:max-h-[min(70dvh,74svh)] md:max-h-[min(72dvh,640px)]"
-                sizes="(max-width: 640px) 92vw, (max-width: 1024px) 420px, 440px"
-              />
+              {useNextImage ? (
+                <Image
+                  src={imageUrl}
+                  alt={config.image_alt}
+                  width={1080}
+                  height={1350}
+                  priority
+                  className="mx-auto h-auto max-h-[min(68dvh,72svh)] w-full object-contain object-center sm:max-h-[min(70dvh,74svh)] md:max-h-[min(72dvh,640px)]"
+                  sizes="(max-width: 640px) 92vw, (max-width: 1024px) 420px, 440px"
+                />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element -- API-served / remote flyer
+                <img
+                  src={imageUrl}
+                  alt={config.image_alt}
+                  width={1080}
+                  height={1350}
+                  className="mx-auto h-auto max-h-[min(68dvh,72svh)] w-full object-contain object-center sm:max-h-[min(70dvh,74svh)] md:max-h-[min(72dvh,640px)]"
+                />
+              )}
             </div>
 
             <div className="mt-3 flex shrink-0 flex-col gap-2 sm:mt-4 sm:flex-row sm:justify-center sm:gap-2.5">
               <a
-                href="#booking"
+                href={config.cta_href || "#booking"}
                 onClick={() => {
                   dismiss();
                   trackEvent(AnalyticsEvents.CtaBook, {
@@ -127,7 +173,7 @@ export function CocktailSpecial() {
                 }}
                 className="inline-flex min-h-11 flex-1 items-center justify-center rounded-full bg-eoe-gold px-5 text-[11px] font-semibold uppercase tracking-[0.18em] text-eoe-ivory hover:bg-eoe-gold/90 sm:flex-none sm:px-6 sm:tracking-[0.2em]"
               >
-                Book a table
+                {config.cta_label}
               </a>
               <button
                 ref={closeRef}
