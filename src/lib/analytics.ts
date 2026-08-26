@@ -33,4 +33,7 @@ export const AnalyticsEvents = {
   BookingRedirectYoco: "Booking Redirect Yoco",
   BookingPaymentReceived: "Booking Payment Received",
   BookingPaymentPending: "Booking Payment Pending",
+  SpecialShown: "Special Shown",
+  SpecialDismissed: "Special Dismissed",
+  SpecialReopened: "Special Reopened",
 } as const;

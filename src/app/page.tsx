@@ -9,6 +9,7 @@ import { Testimonials } from "@/components/sections/Testimonials";
 import { Contact } from "@/components/sections/Contact";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { CustomCursor } from "@/components/ui/CustomCursor";
+import { CocktailSpecial } from "@/components/ui/CocktailSpecial";
 
 export default function Home() {
   return (
@@ -32,6 +33,7 @@ export default function Home() {
         <Testimonials />
       </main>
       <Contact />
+      <CocktailSpecial />
     </div>
   );
 }
