@@ -70,10 +70,10 @@ export function SiteHeader() {
       initial={{ y: -40, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.8, ease: "easeOut" }}
-      className="fixed inset-x-0 top-0 z-40 flex justify-center px-3 pt-3 sm:px-4 sm:pt-4"
+      className="fixed inset-x-0 top-0 z-40 flex justify-center px-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-4 sm:pt-4"
     >
       <div
-        className={`relative flex w-full max-w-6xl items-center gap-2 rounded-full border border-eoe-espresso/10 px-3 py-2.5 text-sm tracking-[0.18em] uppercase sm:gap-3 sm:px-4 sm:py-3 lg:gap-4 lg:px-5 ${
+        className={`relative flex w-full max-w-6xl min-w-0 items-center gap-2 rounded-full border border-eoe-espresso/10 px-3 py-2.5 text-sm tracking-[0.18em] uppercase sm:gap-3 sm:px-4 sm:py-3 lg:gap-4 lg:px-5 ${
           scrolled
             ? "bg-eoe-ivory/80 backdrop-blur-md shadow-[0_18px_60px_rgba(0,0,0,0.12)]"
             : "bg-eoe-ivory/40 backdrop-blur-sm"

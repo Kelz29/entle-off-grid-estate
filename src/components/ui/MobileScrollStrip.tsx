@@ -1,14 +1,18 @@
 import type { ReactNode } from "react";
 
-/** Full-bleed horizontal scroll; first slide aligns with section padding. */
+/**
+ * Horizontal strip that bleeds to the section edges via negative margin.
+ * Avoids `w-screen` / `100vw` full-bleed (those expand the page and clip the UI).
+ */
 const stripOuter =
-  "relative left-1/2 w-screen max-w-[100vw] -translate-x-1/2 overflow-x-auto overscroll-x-contain scroll-smooth pl-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden";
+  "relative -mx-4 overflow-x-auto overscroll-x-contain scroll-smooth pl-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mx-0";
 
-const stripTrack = "flex w-max snap-x snap-mandatory gap-4 pr-4 pb-4";
+const stripTrack =
+  "flex w-max snap-x snap-mandatory gap-4 pr-4 pb-4";
 
-/** ~4rem of the next slide visible on load (below md). */
+/** First card leaves a peek of the next on phones/tablets. Rem-based — no 100vw. */
 export const mobileScrollSlide =
-  "w-[calc(100vw-6.5rem)] shrink-0 snap-start max-md:flex-none md:w-auto";
+  "w-[17.5rem] shrink-0 snap-start max-md:flex-none sm:w-[19rem] md:w-auto";
 
 export function MobileScrollStrip({
   children,

@@ -38,7 +38,7 @@ export function Experiences() {
       {/* Reels — horizontal scroll of portrait videos */}
       <div className="mx-auto max-w-[1400px]">
         <MobileScrollStrip
-          outerClassName="md:left-auto md:w-full md:max-w-none md:translate-x-0 md:pl-0 md:px-1"
+          outerClassName="md:mx-0 md:overflow-visible md:pl-0 md:px-1"
           trackClassName="md:gap-5 md:pr-1"
         >
           {reels.map((reel, index) => (

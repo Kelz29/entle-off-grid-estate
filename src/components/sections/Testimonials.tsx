@@ -42,7 +42,7 @@ export function Testimonials() {
         </div>
 
         <MobileScrollStrip
-          outerClassName="md:left-auto md:w-full md:max-w-none md:translate-x-0 md:overflow-visible md:pl-0"
+          outerClassName="md:mx-0 md:overflow-visible md:pl-0"
           trackClassName="gap-4 md:grid md:w-full md:max-w-none md:grid-cols-3 md:gap-6 md:snap-none md:pr-0 md:pb-0"
         >
           {testimonials.map((t, index) => (

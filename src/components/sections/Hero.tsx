@@ -65,12 +65,12 @@ export function Hero() {
         />
       </div>
 
-      <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col justify-end px-4 pb-20 pt-32 md:px-6 lg:px-8">
+      <div className="relative z-10 mx-auto flex w-full min-w-0 max-w-6xl flex-1 flex-col justify-end px-4 pb-20 pt-32 md:px-6 lg:px-8">
         <motion.p
           initial={reducedMotion ? false : { opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, ease: "easeOut" }}
-          className="mb-4 text-xs tracking-[0.35em] text-eoe-ivory/85"
+          className="mb-4 text-xs tracking-[0.28em] text-eoe-ivory/85 sm:tracking-[0.35em]"
         >
           OFF GRID ESTATE • SOUTH AFRICA
         </motion.p>
@@ -79,7 +79,7 @@ export function Hero() {
           initial={reducedMotion ? false : { opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 1, ease: "easeOut", delay: 0.05 }}
-          className="font-display text-[11vw] leading-[0.9] tracking-[0.12em] text-eoe-ivory md:text-[6.5vw]"
+          className="max-w-full font-display text-[clamp(2.4rem,11vw,6.5rem)] leading-[0.9] tracking-[0.1em] text-eoe-ivory sm:tracking-[0.12em] md:text-[6.5vw]"
         >
           An escape <br />that feels <br />like home
         </motion.h1>
@@ -88,10 +88,9 @@ export function Hero() {
           initial={reducedMotion ? false : { opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 1, ease: "easeOut", delay: 0.15 }}
-          className="mt-5 max-w-xl font-display text-2xl tracking-[0.08em] text-eoe-ivory/90 md:text-3xl"
+          className="mt-5 max-w-xl font-display text-xl tracking-[0.08em] text-eoe-ivory/90 sm:text-2xl md:text-3xl"
         >
-           Entle Off Grid Estate
-          
+          Entle Off Grid Estate
         </motion.p>
 
         <motion.div
@@ -110,14 +109,14 @@ export function Hero() {
           initial={reducedMotion ? false : { opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 1, ease: "easeOut", delay: 0.35 }}
-          className="mt-8 flex flex-wrap items-center gap-4"
+          className="mt-8 flex max-w-full flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4"
         >
           <a
             href="#booking"
             onClick={() =>
               trackEvent(AnalyticsEvents.CtaBook, { source: "hero" })
             }
-            className="rounded-full border border-eoe-gold bg-eoe-gold px-6 py-3 text-xs font-semibold tracking-[0.22em] text-eoe-ivory hover:bg-eoe-gold/90"
+            className="inline-flex items-center justify-center rounded-full border border-eoe-gold bg-eoe-gold px-5 py-3 text-center text-[11px] font-semibold tracking-[0.18em] text-eoe-ivory hover:bg-eoe-gold/90 sm:px-6 sm:text-xs sm:tracking-[0.22em]"
           >
             BOOK A DATE
           </a>
@@ -126,7 +125,7 @@ export function Hero() {
             onClick={() =>
               trackEvent(AnalyticsEvents.CtaExplore, { source: "hero" })
             }
-            className="rounded-full border border-eoe-ivory/40 px-6 py-3 text-xs font-semibold tracking-[0.22em] text-eoe-ivory/90 hover:bg-eoe-ivory/5"
+            className="inline-flex items-center justify-center rounded-full border border-eoe-ivory/40 px-5 py-3 text-center text-[11px] font-semibold tracking-[0.18em] text-eoe-ivory/90 hover:bg-eoe-ivory/5 sm:px-6 sm:text-xs sm:tracking-[0.22em]"
           >
             EXPLORE THE ESTATE
           </a>

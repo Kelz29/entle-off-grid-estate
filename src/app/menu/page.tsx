@@ -21,7 +21,7 @@ export default function MenuPage() {
         </PageIntro>
       </div>
 
-      <div className="mx-auto max-w-6xl px-4 pb-16 md:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-6xl px-4 pb-16 md:px-6 lg:px-8">
         <CafeMenu />
         <div className="mt-10 flex flex-wrap gap-3">
           <Link

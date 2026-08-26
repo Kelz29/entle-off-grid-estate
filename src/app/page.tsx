@@ -13,7 +13,7 @@ import { CocktailSpecial } from "@/components/ui/CocktailSpecial";
 
 export default function Home() {
   return (
-    <div className="bg-eoe-ivory text-eoe-ink">
+    <div className="overflow-x-clip bg-eoe-ivory text-eoe-ink">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded-full focus:bg-eoe-espresso focus:px-4 focus:py-2 focus:text-sm focus:text-eoe-ivory"
@@ -22,7 +22,7 @@ export default function Home() {
       </a>
       <CustomCursor />
       <SiteHeader />
-      <main id="main-content" className="relative">
+      <main id="main-content" className="relative overflow-x-clip">
         <Hero />
         <Estate />
         <Spaces />

@@ -8,16 +8,16 @@ export function Estate() {
   return (
     <section
       id="estate"
-      className="relative border-t border-eoe-espresso/10 bg-eoe-ivory px-4 py-20 md:px-6 lg:px-8"
+      className="relative overflow-x-clip border-t border-eoe-espresso/10 bg-eoe-ivory px-4 py-20 md:px-6 lg:px-8"
     >
       <div className="pointer-events-none absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-60 mix-blend-soft-light" />
-      <div className="relative mx-auto flex max-w-6xl flex-col gap-12 md:flex-row md:items-center">
+      <div className="relative mx-auto flex max-w-6xl flex-col gap-12 md:flex-row md:items-center md:gap-10 lg:gap-12">
         <motion.div
           initial={{ opacity: 0, x: -40 }}
           whileInView={{ opacity: 1, x: 0 }}
           viewport={{ once: true, amount: 0.4 }}
           transition={{ duration: 0.9, ease: "easeOut" }}
-          className="group relative aspect-[3/4] overflow-hidden rounded-3xl bg-eoe-espresso/10 md:w-[45%]"
+          className="group relative aspect-[3/4] w-full overflow-hidden rounded-3xl bg-eoe-espresso/10 md:w-[45%] md:shrink-0"
         >
           <Image
             src={estatePhoto.src}
@@ -37,7 +37,7 @@ export function Estate() {
           whileInView={{ opacity: 1, x: 0 }}
           viewport={{ once: true, amount: 0.4 }}
           transition={{ duration: 0.9, ease: "easeOut", delay: 0.1 }}
-          className="md:w-1/2"
+          className="min-w-0 md:flex-1"
         >
           <p className="mb-4 text-xs tracking-[0.3em] text-eoe-espresso">
             ABOUT THE ESTATE

@@ -92,9 +92,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en-ZA">
+    <html lang="en-ZA" suppressHydrationWarning>
       <body
         className={`${dmSans.variable} ${cormorant.variable} antialiased bg-eoe-ivory text-eoe-ink`}
+        suppressHydrationWarning
       >
         <script
           type="application/ld+json"
