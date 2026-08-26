@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans, Cormorant_Garamond } from "next/font/google";
-import { Analytics } from "@vercel/analytics/next";
+import { GoogleAnalytics } from "@next/third-parties/google";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 
@@ -21,6 +21,9 @@ const siteUrl =
   process.env.APP_BASE_URL?.replace(/\/$/, "") ||
   "http://localhost:3000";
 
+const gaId =
+  process.env.NEXT_GA_MEASUREMENT_ID?.trim() || "G-JLL86E499S";
+
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
@@ -38,7 +41,14 @@ export const metadata: Metadata = {
     title: "Entle Off Grid Estate",
     description:
       "A refined off-grid café, event venue, and private estate in Bloemfontein, South Africa.",
-    images: [{ url: "/outdoor/eoe.jpg", width: 1200, height: 1600, alt: "Entle Off Grid Estate" }],
+    images: [
+      {
+        url: "/outdoor/eoe.jpg",
+        width: 1200,
+        height: 1600,
+        alt: "Entle Off Grid Estate",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
@@ -102,7 +112,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
         {children}
-        <Analytics />
+        <GoogleAnalytics gaId={gaId} />
         <SpeedInsights />
       </body>
     </html>
