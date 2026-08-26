@@ -8,6 +8,7 @@ import {
 } from "@/lib/calendly/repository";
 import { parseBookingId } from "@/lib/calendly/booking-id";
 import { sendBookingConfirmation } from "@/lib/email";
+import { notifyNewBooking } from "@/lib/slack";
 import {
   ServerAnalyticsEvents,
   trackServerEvent,
@@ -73,7 +74,10 @@ export async function POST(request: Request) {
         });
         const booking = await getBooking(bookingId);
         const business = booking && (await getActiveBusiness(booking.business_id));
-        if (booking && business) await sendBookingConfirmation(booking, business);
+        if (booking && business) {
+          await sendBookingConfirmation(booking, business);
+          await notifyNewBooking(booking, business, "paid");
+        }
       }
     }
   }

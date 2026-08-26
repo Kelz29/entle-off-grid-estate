@@ -7,6 +7,7 @@ import {
 } from "@/lib/calendly/repository";
 import { parseBookingId } from "@/lib/calendly/booking-id";
 import { sendBookingConfirmation } from "@/lib/email";
+import { notifyNewBooking } from "@/lib/slack";
 import { getCheckout, YocoError } from "@/lib/yoco";
 
 /**
@@ -96,6 +97,7 @@ export async function POST(request: Request) {
       updated && (await getActiveBusiness(updated.business_id));
     if (updated && business) {
       await sendBookingConfirmation(updated, business);
+      await notifyNewBooking(updated, business, "paid");
     }
   }
 

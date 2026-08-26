@@ -23,6 +23,7 @@ import {
   isValidPhone,
   normalizeEmail,
 } from "@/lib/contact-validation";
+import { notifyNewBooking } from "@/lib/slack";
 
 // GET /api/v1/calendly/scheduled_events?business_id=1&status=active
 // Admin session only — full PII list.
@@ -128,6 +129,8 @@ export async function POST(request: Request) {
       notes: parsed.notes,
       specialRequest: parsed.specialRequest,
     });
+    // Admin walk-in / phone booking — alert the ops channel immediately.
+    await notifyNewBooking(booking, business, "walk_in");
     return NextResponse.json(
       { resource: serializeScheduledEvent(booking, business) },
       { status: 201 }
