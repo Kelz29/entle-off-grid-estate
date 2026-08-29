@@ -160,12 +160,15 @@ export async function POST(request: Request) {
   }
 
   const tokenQs = `token=${encodeURIComponent(releaseToken)}`;
+  const successUrl = `${baseUrl}/booking/success/${encodeURIComponent(bookingId)}`;
+  const cancelUrl = `${baseUrl}/booking/cancelled/${encodeURIComponent(bookingId)}?${tokenQs}`;
+  const failureUrl = `${baseUrl}/booking/failed/${encodeURIComponent(bookingId)}?${tokenQs}`;
   try {
     const checkout = await createCheckout({
       amountInCents,
-      successUrl: `${baseUrl}/booking/success/${encodeURIComponent(bookingId)}`,
-      cancelUrl: `${baseUrl}/booking/cancelled/${encodeURIComponent(bookingId)}?${tokenQs}`,
-      failureUrl: `${baseUrl}/booking/failed/${encodeURIComponent(bookingId)}?${tokenQs}`,
+      successUrl,
+      cancelUrl,
+      failureUrl,
       metadata: {
         bookingId,
         businessId: String(business.id),
@@ -192,11 +195,22 @@ export async function POST(request: Request) {
     await releaseUnpaidBooking(bookingId).catch(() => {});
     const message =
       err instanceof YocoError ? err.message : "Could not start payment";
+    const yocoStatus = err instanceof YocoError ? err.status : undefined;
+    console.error("[checkout] Yoco failed:", {
+      yocoStatus,
+      message,
+      baseUrl,
+      amountInCents,
+      successUrl,
+    });
     await trackServerEvent(ServerAnalyticsEvents.CheckoutYocoFailed, {
       service_id: service.id,
       amount_cents: amountInCents,
     });
-    return NextResponse.json({ detail: message }, { status: 502 });
+    return NextResponse.json(
+      { detail: message, ...(yocoStatus ? { yocoStatus } : {}) },
+      { status: 502 }
+    );
   }
 }
 
