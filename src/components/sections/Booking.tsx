@@ -679,8 +679,7 @@ export function Booking() {
                           : ""}
                         {` + ${money(PLATFORM_FEE_CENTS)} platform fee`}
                         ). The deposit portion comes off your bill on arrival.
-                        You&apos;ll be taken to Yoco&apos;s secure checkout. Test
-                        card 4111 1111 1111 1111, any future expiry &amp; CVV.
+                        You&apos;ll be taken to Yoco&apos;s secure checkout.
                       </>
                     )}
                   </p>
