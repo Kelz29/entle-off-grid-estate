@@ -5,7 +5,7 @@ import {
   setSlotHold,
   deleteSlotOverride,
   bookedGuestsForSlot,
-  getSlotHolds,
+  getMergedSlotHolds,
 } from "@/lib/calendly/repository";
 import { getSlotUsage } from "@/lib/calendly/availability";
 import {
@@ -13,6 +13,7 @@ import {
   BadEventTypeError,
 } from "@/lib/calendly/config";
 import { parseIsoAssumeUtc, toZonedIso } from "@/lib/calendly/time";
+import { cafePoolCapacity } from "@/lib/calendly/cafe-pool";
 import { isAdminAuthorized, requireAdminSession } from "@/lib/admin-auth";
 import { canManageSeats } from "@/lib/admin-roles";
 import type { ServiceRow } from "@/lib/calendly/types";
@@ -138,7 +139,7 @@ export async function PATCH(request: Request) {
   // Real bookings can't be un-booked, so left maxes out at capacity − real.
   const end = new Date(start.getTime() + service.duration_minutes * 60_000);
   const real = await bookedGuestsForSlot(serviceId, start, end);
-  const capacity = service.capacity;
+  const capacity = cafePoolCapacity(service.slug, service.capacity);
   const clampedLeft = Math.min(seatsLeft, Math.max(0, capacity - real));
   const held = capacity - real - clampedLeft; // >= 0
   if (held <= 0) {
@@ -156,20 +157,21 @@ async function slotState(
   start: Date
 ) {
   const end = new Date(start.getTime() + service.duration_minutes * 60_000);
-  const holds = await getSlotHolds(
-    service.id,
+  const holds = await getMergedSlotHolds(
+    service,
     start,
     new Date(start.getTime() + 1000)
   );
   const held = holds.get(start.toISOString()) ?? 0;
   const real = await bookedGuestsForSlot(service.id, start, end);
+  const capacity = cafePoolCapacity(service.slug, service.capacity);
   const booked = real + held;
   return {
     start_time: toZonedIso(start, business.timezone),
-    capacity: service.capacity,
+    capacity,
     booked,
     held,
-    remaining: Math.max(0, service.capacity - booked),
+    remaining: Math.max(0, capacity - booked),
     overridden: held > 0,
   };
 }

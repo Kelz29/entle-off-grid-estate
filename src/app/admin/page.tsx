@@ -169,6 +169,139 @@ type StatusFilter = "upcoming" | "today" | "past" | "cancelled" | "all";
 type View = "agenda" | "table";
 type AdminSection = RoleSection;
 type PaymentFilter = "all" | "paid" | "partial" | "awaiting" | "arrival";
+type SeenFilter = "all" | "unseen" | "seen";
+type BookingSort = "auto" | "start_asc" | "start_desc" | "booked_desc" | "booked_asc";
+
+const FILTER_SELECT_CLASS =
+  "min-h-10 w-full rounded-full border border-eoe-espresso/15 bg-white px-3 py-2 text-sm text-eoe-espresso outline-none focus:border-eoe-gold sm:min-w-0";
+const FILTER_INPUT_CLASS =
+  "min-h-10 w-full rounded-full border border-eoe-espresso/15 bg-white px-3 py-2 text-sm text-eoe-espresso outline-none placeholder:text-eoe-espresso/60 focus:border-eoe-gold";
+
+type BookingFilterOpts = {
+  statusFilter: StatusFilter;
+  experience: string;
+  q: string;
+  payFilter: PaymentFilter;
+  dateFrom: string;
+  dateTo: string;
+  seenFilter: SeenFilter;
+  minGuests: string;
+  maxGuests: string;
+  specialRequestOnly: boolean;
+  carWashOnly: boolean;
+  today: string;
+};
+
+function matchesBookingFilters(b: ScheduledEvent, opts: BookingFilterOpts): boolean {
+  const key = dayKey(b.start_time);
+  const cancelled = b.status === "canceled";
+
+  if (opts.statusFilter === "cancelled" && !cancelled) return false;
+  if (opts.statusFilter !== "cancelled" && opts.statusFilter !== "all" && cancelled)
+    return false;
+  if (opts.statusFilter === "upcoming" && key < opts.today) return false;
+  if (opts.statusFilter === "today" && key !== opts.today) return false;
+  if (opts.statusFilter === "past" && key >= opts.today) return false;
+
+  if (opts.dateFrom && key < opts.dateFrom) return false;
+  if (opts.dateTo && key > opts.dateTo) return false;
+
+  if (opts.experience !== "all" && serviceId(b.event_type) !== opts.experience)
+    return false;
+
+  if (opts.payFilter !== "all") {
+    if (opts.payFilter === "paid" && b.payment_status !== "paid") return false;
+    if (opts.payFilter === "partial" && b.payment_status !== "partially_paid")
+      return false;
+    if (
+      opts.payFilter === "awaiting" &&
+      (b.payment_status !== "unpaid" || b.pay_on_arrival)
+    )
+      return false;
+    if (opts.payFilter === "arrival" && !b.pay_on_arrival) return false;
+  }
+
+  if (opts.seenFilter === "unseen" && b.seen) return false;
+  if (opts.seenFilter === "seen" && !b.seen) return false;
+
+  if (opts.minGuests.trim()) {
+    const min = Number(opts.minGuests);
+    if (Number.isFinite(min) && b.guests < min) return false;
+  }
+  if (opts.maxGuests.trim()) {
+    const max = Number(opts.maxGuests);
+    if (Number.isFinite(max) && b.guests > max) return false;
+  }
+
+  if (opts.specialRequestOnly && !b.special_request?.trim()) return false;
+  if (opts.carWashOnly && !(b.cars != null && b.cars > 0)) return false;
+
+  const needle = opts.q.trim().toLowerCase();
+  if (!needle) return true;
+  return (
+    b.invitee.name.toLowerCase().includes(needle) ||
+    b.invitee.email.toLowerCase().includes(needle) ||
+    (b.invitee.phone ?? "").toLowerCase().includes(needle) ||
+    b.name.toLowerCase().includes(needle) ||
+    (b.notes ?? "").toLowerCase().includes(needle) ||
+    (b.special_request ?? "").toLowerCase().includes(needle) ||
+    bookingId(b.uri).toLowerCase().includes(needle)
+  );
+}
+
+function sortBookings(
+  rows: ScheduledEvent[],
+  sort: BookingSort,
+  statusFilter: StatusFilter
+): ScheduledEvent[] {
+  const copy = [...rows];
+  const effective =
+    sort === "auto"
+      ? statusFilter === "upcoming" || statusFilter === "today"
+        ? "start_asc"
+        : "start_desc"
+      : sort;
+  switch (effective) {
+    case "start_desc":
+      return copy.sort((a, b) => b.start_time.localeCompare(a.start_time));
+    case "booked_desc":
+      return copy.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    case "booked_asc":
+      return copy.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    default:
+      return copy.sort((a, b) => a.start_time.localeCompare(b.start_time));
+  }
+}
+
+function countActiveBookingFilters(opts: {
+  statusFilter: StatusFilter;
+  experience: string;
+  q: string;
+  payFilter: PaymentFilter;
+  dateFrom: string;
+  dateTo: string;
+  seenFilter: SeenFilter;
+  minGuests: string;
+  maxGuests: string;
+  specialRequestOnly: boolean;
+  carWashOnly: boolean;
+  bookingSort: BookingSort;
+}): number {
+  let n = 0;
+  if (opts.statusFilter !== "upcoming") n++;
+  if (opts.experience !== "all") n++;
+  if (opts.q.trim()) n++;
+  if (opts.payFilter !== "all") n++;
+  if (opts.dateFrom) n++;
+  if (opts.dateTo) n++;
+  if (opts.seenFilter !== "all") n++;
+  if (opts.minGuests.trim()) n++;
+  if (opts.maxGuests.trim()) n++;
+  if (opts.specialRequestOnly) n++;
+  if (opts.carWashOnly) n++;
+  if (opts.bookingSort !== "auto") n++;
+  return n;
+}
 
 const NAV: { id: AdminSection; label: string; hint: string }[] = [
   { id: "overview", label: "Overview", hint: "KPIs and load" },
@@ -207,6 +340,16 @@ export default function AdminPage() {
   const [q, setQ] = useState("");
   const [view, setView] = useState<View>("agenda");
   const [payFilter, setPayFilter] = useState<PaymentFilter>("all");
+  const [bookingPayFilter, setBookingPayFilter] = useState<PaymentFilter>("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [seenFilter, setSeenFilter] = useState<SeenFilter>("all");
+  const [minGuests, setMinGuests] = useState("");
+  const [maxGuests, setMaxGuests] = useState("");
+  const [specialRequestOnly, setSpecialRequestOnly] = useState(false);
+  const [carWashOnly, setCarWashOnly] = useState(false);
+  const [bookingSort, setBookingSort] = useState<BookingSort>("auto");
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [detailUri, setDetailUri] = useState<string | null>(null);
 
   const today = venueTodayKey();
@@ -318,37 +461,92 @@ export default function AdminPage() {
     return { days, max };
   }, [all, today]);
 
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return all.filter((b) => {
-      const key = dayKey(b.start_time);
-      const cancelled = b.status === "canceled";
-      if (statusFilter === "cancelled" && !cancelled) return false;
-      if (statusFilter !== "cancelled" && statusFilter !== "all" && cancelled)
-        return false;
-      if (statusFilter === "upcoming" && key < today) return false;
-      if (statusFilter === "today" && key !== today) return false;
-      if (statusFilter === "past" && key >= today) return false;
-      if (experience !== "all" && serviceId(b.event_type) !== experience)
-        return false;
-      if (!needle) return true;
-      return (
-        b.invitee.name.toLowerCase().includes(needle) ||
-        b.invitee.email.toLowerCase().includes(needle) ||
-        (b.invitee.phone ?? "").toLowerCase().includes(needle) ||
-        b.name.toLowerCase().includes(needle)
-      );
-    });
-  }, [all, statusFilter, experience, q, today]);
+  const bookingFilterOpts = useMemo(
+    (): BookingFilterOpts => ({
+      statusFilter,
+      experience,
+      q,
+      payFilter: bookingPayFilter,
+      dateFrom,
+      dateTo,
+      seenFilter,
+      minGuests,
+      maxGuests,
+      specialRequestOnly,
+      carWashOnly,
+      today,
+    }),
+    [
+      statusFilter,
+      experience,
+      q,
+      bookingPayFilter,
+      dateFrom,
+      dateTo,
+      seenFilter,
+      minGuests,
+      maxGuests,
+      specialRequestOnly,
+      carWashOnly,
+      today,
+    ]
+  );
 
-  const sorted = useMemo(() => {
-    const asc = statusFilter === "upcoming" || statusFilter === "today";
-    return [...filtered].sort((a, b) =>
-      asc
-        ? a.start_time.localeCompare(b.start_time)
-        : b.start_time.localeCompare(a.start_time)
-    );
-  }, [filtered, statusFilter]);
+  const activeBookingFilterCount = useMemo(
+    () =>
+      countActiveBookingFilters({
+        statusFilter,
+        experience,
+        q,
+        payFilter: bookingPayFilter,
+        dateFrom,
+        dateTo,
+        seenFilter,
+        minGuests,
+        maxGuests,
+        specialRequestOnly,
+        carWashOnly,
+        bookingSort,
+      }),
+    [
+      statusFilter,
+      experience,
+      q,
+      bookingPayFilter,
+      dateFrom,
+      dateTo,
+      seenFilter,
+      minGuests,
+      maxGuests,
+      specialRequestOnly,
+      carWashOnly,
+      bookingSort,
+    ]
+  );
+
+  const clearBookingFilters = useCallback(() => {
+    setStatusFilter("upcoming");
+    setExperience("all");
+    setQ("");
+    setBookingPayFilter("all");
+    setDateFrom("");
+    setDateTo("");
+    setSeenFilter("all");
+    setMinGuests("");
+    setMaxGuests("");
+    setSpecialRequestOnly(false);
+    setCarWashOnly(false);
+    setBookingSort("auto");
+  }, []);
+
+  const filtered = useMemo(() => {
+    return all.filter((b) => matchesBookingFilters(b, bookingFilterOpts));
+  }, [all, bookingFilterOpts]);
+
+  const sorted = useMemo(
+    () => sortBookings(filtered, bookingSort, statusFilter),
+    [filtered, bookingSort, statusFilter]
+  );
 
   const grouped = useMemo(() => {
     const groups = new Map<string, ScheduledEvent[]>();
@@ -386,20 +584,27 @@ export default function AdminPage() {
     await Promise.all([mutate(), mutateTypes()]);
   }, [mutate, mutateTypes]);
 
+  const applyQuickStatusFilter = useCallback(
+    (filter: StatusFilter) => {
+      clearBookingFilters();
+      setStatusFilter(filter);
+    },
+    [clearBookingFilters]
+  );
+
   const openBooking = useCallback(
     (b: ScheduledEvent) => {
       const key = dayKey(b.start_time);
       setSection("bookings");
       setNavOpen(false);
-      setExperience("all");
-      setQ("");
+      clearBookingFilters();
       if (b.status === "canceled") setStatusFilter("cancelled");
       else if (key === today) setStatusFilter("today");
       else if (key < today) setStatusFilter("past");
       else setStatusFilter("upcoming");
       setDetailUri(b.uri);
     },
-    [today]
+    [today, clearBookingFilters]
   );
 
   const sectionTitle =
@@ -789,7 +994,7 @@ export default function AdminPage() {
                   value={stats.upcoming}
                   tone="primary"
                   onClick={() => {
-                    setStatusFilter("upcoming");
+                    applyQuickStatusFilter("upcoming");
                     go("bookings");
                   }}
                 />
@@ -797,7 +1002,7 @@ export default function AdminPage() {
                   label="Today"
                   value={stats.today}
                   onClick={() => {
-                    setStatusFilter("today");
+                    applyQuickStatusFilter("today");
                     go("bookings");
                   }}
                 />
@@ -836,7 +1041,7 @@ export default function AdminPage() {
                   value={stats.cancelled}
                   tone="muted"
                   onClick={() => {
-                    setStatusFilter("cancelled");
+                    applyQuickStatusFilter("cancelled");
                     go("bookings");
                   }}
                 />
@@ -890,29 +1095,199 @@ export default function AdminPage() {
                     />
                   </div>
                   <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                    <select
-                      value={experience}
-                      onChange={(e) => setExperience(e.target.value)}
-                      className="min-h-11 w-full rounded-full border border-eoe-espresso/15 bg-white px-4 py-2.5 text-sm text-eoe-espresso outline-none focus:border-eoe-gold sm:w-auto sm:min-w-[11rem]"
-                    >
-                      <option value="all">All experiences</option>
-                      {types.map((t) => (
-                        <option key={t.uri} value={serviceId(t.uri)}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
                     <input
                       value={q}
                       onChange={(e) => setQ(e.target.value)}
-                      placeholder="Search guest, email, phone"
-                      className="min-h-11 min-w-0 flex-1 rounded-full border border-eoe-espresso/15 bg-white px-4 py-2.5 text-sm text-eoe-espresso outline-none placeholder:text-eoe-espresso/70 focus:border-eoe-gold sm:min-w-[12rem]"
+                      placeholder="Search guest, email, phone, notes, ID"
+                      className="min-h-11 min-w-0 flex-1 rounded-full border border-eoe-espresso/15 bg-white px-4 py-2.5 text-sm text-eoe-espresso outline-none placeholder:text-eoe-espresso/70 focus:border-eoe-gold sm:min-w-[14rem]"
                     />
                     <div className="hidden sm:block">
                       <Toggle value={view} onChange={setView} />
                     </div>
                   </div>
                 </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFiltersExpanded((v) => !v)}
+                    className="inline-flex min-h-10 items-center gap-2 rounded-full border border-eoe-espresso/15 bg-white px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso hover:border-eoe-gold/50"
+                  >
+                    Filters
+                    {activeBookingFilterCount > 0 && (
+                      <span className="rounded-full bg-eoe-gold px-2 py-0.5 text-[10px] font-semibold text-eoe-ivory">
+                        {activeBookingFilterCount}
+                      </span>
+                    )}
+                    <span className="text-eoe-espresso/60">
+                      {filtersExpanded ? "▲" : "▼"}
+                    </span>
+                  </button>
+                  {activeBookingFilterCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearBookingFilters}
+                      className="min-h-10 rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso/75 hover:text-eoe-espresso"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+
+                {(filtersExpanded || activeBookingFilterCount > 0) && (
+                  <div className="rounded-2xl border border-eoe-espresso/10 bg-white/80 p-3 shadow-sm sm:p-4">
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase tracking-[0.16em] text-eoe-espresso/70">
+                          Experience
+                        </span>
+                        <select
+                          value={experience}
+                          onChange={(e) => setExperience(e.target.value)}
+                          className={FILTER_SELECT_CLASS}
+                        >
+                          <option value="all">All experiences</option>
+                          {types.map((t) => (
+                            <option key={t.uri} value={serviceId(t.uri)}>
+                              {t.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      {canAccessSection(role, "payments") && (
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[10px] uppercase tracking-[0.16em] text-eoe-espresso/70">
+                            Payment
+                          </span>
+                          <select
+                            value={bookingPayFilter}
+                            onChange={(e) =>
+                              setBookingPayFilter(e.target.value as PaymentFilter)
+                            }
+                            className={FILTER_SELECT_CLASS}
+                          >
+                            <option value="all">Any payment</option>
+                            <option value="paid">Paid in full</option>
+                            <option value="partial">Balance due</option>
+                            <option value="awaiting">Awaiting payment</option>
+                            <option value="arrival">Pays at restaurant</option>
+                          </select>
+                        </label>
+                      )}
+
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase tracking-[0.16em] text-eoe-espresso/70">
+                          Notification
+                        </span>
+                        <select
+                          value={seenFilter}
+                          onChange={(e) =>
+                            setSeenFilter(e.target.value as SeenFilter)
+                          }
+                          className={FILTER_SELECT_CLASS}
+                        >
+                          <option value="all">All bookings</option>
+                          <option value="unseen">Unseen only</option>
+                          <option value="seen">Seen only</option>
+                        </select>
+                      </label>
+
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase tracking-[0.16em] text-eoe-espresso/70">
+                          Sort by
+                        </span>
+                        <select
+                          value={bookingSort}
+                          onChange={(e) =>
+                            setBookingSort(e.target.value as BookingSort)
+                          }
+                          className={FILTER_SELECT_CLASS}
+                        >
+                          <option value="auto">Default</option>
+                          <option value="start_asc">Start time (earliest)</option>
+                          <option value="start_desc">Start time (latest)</option>
+                          <option value="booked_desc">Booked recently</option>
+                          <option value="booked_asc">Booked oldest</option>
+                        </select>
+                      </label>
+
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase tracking-[0.16em] text-eoe-espresso/70">
+                          From date
+                        </span>
+                        <input
+                          type="date"
+                          value={dateFrom}
+                          onChange={(e) => setDateFrom(e.target.value)}
+                          className={FILTER_INPUT_CLASS}
+                        />
+                      </label>
+
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase tracking-[0.16em] text-eoe-espresso/70">
+                          To date
+                        </span>
+                        <input
+                          type="date"
+                          value={dateTo}
+                          onChange={(e) => setDateTo(e.target.value)}
+                          className={FILTER_INPUT_CLASS}
+                        />
+                      </label>
+
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase tracking-[0.16em] text-eoe-espresso/70">
+                          Min guests
+                        </span>
+                        <input
+                          type="number"
+                          min={1}
+                          placeholder="Any"
+                          value={minGuests}
+                          onChange={(e) => setMinGuests(e.target.value)}
+                          className={FILTER_INPUT_CLASS}
+                        />
+                      </label>
+
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase tracking-[0.16em] text-eoe-espresso/70">
+                          Max guests
+                        </span>
+                        <input
+                          type="number"
+                          min={1}
+                          placeholder="Any"
+                          value={maxGuests}
+                          onChange={(e) => setMaxGuests(e.target.value)}
+                          className={FILTER_INPUT_CLASS}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-4 border-t border-eoe-espresso/8 pt-3">
+                      <label className="flex cursor-pointer items-center gap-2 text-sm text-eoe-espresso">
+                        <input
+                          type="checkbox"
+                          checked={specialRequestOnly}
+                          onChange={(e) => setSpecialRequestOnly(e.target.checked)}
+                          className="size-4 rounded border-eoe-espresso/25 text-eoe-gold focus:ring-eoe-gold/40"
+                        />
+                        Special request only
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm text-eoe-espresso">
+                        <input
+                          type="checkbox"
+                          checked={carWashOnly}
+                          onChange={(e) => setCarWashOnly(e.target.checked)}
+                          className="size-4 rounded border-eoe-espresso/25 text-eoe-gold focus:ring-eoe-gold/40"
+                        />
+                        Car wash included
+                      </label>
+                    </div>
+                  </div>
+                )}
+
                 <div className="sm:hidden">
                   <Toggle value={view} onChange={setView} />
                 </div>
@@ -920,6 +1295,13 @@ export default function AdminPage() {
 
               <p className="mt-4 text-xs uppercase tracking-[0.2em] text-eoe-espresso/70 sm:mt-5">
                 {sorted.length} {sorted.length === 1 ? "booking" : "bookings"}
+                {activeBookingFilterCount > 0 && (
+                  <span className="text-eoe-espresso/55">
+                    {" "}
+                    · {activeBookingFilterCount} filter
+                    {activeBookingFilterCount === 1 ? "" : "s"} active
+                  </span>
+                )}
               </p>
 
               {isLoading && (

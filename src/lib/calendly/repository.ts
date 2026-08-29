@@ -1,4 +1,8 @@
 import { query } from "@/lib/db";
+import {
+  CAFE_POOL_SLUGS,
+  isCafePoolService,
+} from "./cafe-pool";
 import type { BusinessRow, ServiceRow, BookingRow } from "./types";
 
 export async function getActiveBusiness(
@@ -105,23 +109,57 @@ export async function listServices(
   return rows;
 }
 
+/** Café table + car wash service ids (shared seating pool). */
+export async function listCafePoolServiceIds(businessId: number): Promise<number[]> {
+  const { rows } = await query<{ id: number }>(
+    `SELECT id FROM services
+      WHERE business_id = $1 AND slug IN ($2, $3) AND is_active = 1`,
+    [businessId, CAFE_POOL_SLUGS[0], CAFE_POOL_SLUGS[1]]
+  );
+  return rows.map((r) => r.id);
+}
+
+function serviceIdsForCapacity(service: ServiceRow): Promise<number[]> {
+  if (isCafePoolService(service.slug)) {
+    return listCafePoolServiceIds(service.business_id);
+  }
+  return Promise.resolve([service.id]);
+}
+
+// Bookings that occupy time for one or more services in [from, to).
+export async function getActiveBookingsForServices(
+  serviceIds: number[],
+  from: Date,
+  to: Date
+): Promise<Array<{
+  service_id: number;
+  start_time: string;
+  end_time: string;
+  guests: number;
+}>> {
+  if (serviceIds.length === 0) return [];
+  const placeholders = serviceIds.map((_, i) => `$${i + 3}`).join(", ");
+  const { rows } = await query<{
+    service_id: number;
+    start_time: string;
+    end_time: string;
+    guests: number;
+  }>(
+    `SELECT service_id, start_time, end_time, guests FROM bookings
+      WHERE service_id IN (${placeholders}) AND status <> 'cancelled'
+        AND start_time < $2 AND end_time > $1`,
+    [from.toISOString(), to.toISOString(), ...serviceIds]
+  );
+  return rows;
+}
+
 // Bookings that occupy time for a service in [from, to). Cancelled excluded.
 export async function getActiveBookingsForService(
   serviceId: number,
   from: Date,
   to: Date
 ): Promise<Array<{ start_time: string; end_time: string; guests: number }>> {
-  const { rows } = await query<{
-    start_time: string;
-    end_time: string;
-    guests: number;
-  }>(
-    `SELECT start_time, end_time, guests FROM bookings
-      WHERE service_id = $1 AND status <> 'cancelled'
-        AND start_time < $3 AND end_time > $2`,
-    [serviceId, from.toISOString(), to.toISOString()]
-  );
-  return rows;
+  return getActiveBookingsForServices([serviceId], from, to);
 }
 
 // Per-slot manual holds (blocked seats) in [from, to), keyed by ISO start.
@@ -137,6 +175,29 @@ export async function getSlotHolds(
   );
   const m = new Map<string, number>();
   for (const r of rows) m.set(new Date(r.slot_start).toISOString(), r.held_seats);
+  return m;
+}
+
+/** Holds for a service; café pool services sum holds across both event types. */
+export async function getMergedSlotHolds(
+  service: ServiceRow,
+  from: Date,
+  to: Date
+): Promise<Map<string, number>> {
+  const serviceIds = await serviceIdsForCapacity(service);
+  if (serviceIds.length === 0) return new Map();
+  const placeholders = serviceIds.map((_, i) => `$${i + 3}`).join(", ");
+  const { rows } = await query<{ slot_start: string; held_seats: number | string }>(
+    `SELECT slot_start, SUM(held_seats) AS held_seats FROM slot_overrides
+      WHERE service_id IN (${placeholders})
+        AND slot_start >= $1 AND slot_start < $2
+      GROUP BY slot_start`,
+    [from.toISOString(), to.toISOString(), ...serviceIds]
+  );
+  const m = new Map<string, number>();
+  for (const r of rows) {
+    m.set(new Date(r.slot_start).toISOString(), Number(r.held_seats ?? 0));
+  }
   return m;
 }
 
@@ -170,14 +231,24 @@ export async function bookedGuestsForSlot(
   serviceId: number,
   start: Date,
   end: Date,
-  excludeBookingId?: number
+  excludeBookingId?: string
 ): Promise<number> {
+  const service = await getService(serviceId);
+  if (!service) return 0;
+  const serviceIds = await serviceIdsForCapacity(service);
+  if (serviceIds.length === 0) return 0;
+  const placeholders = serviceIds.map((_, i) => `$${i + 4}`).join(", ");
   const { rows } = await query<{ seats: number | string }>(
     `SELECT COALESCE(SUM(guests), 0) AS seats FROM bookings
-      WHERE service_id = $1 AND status <> 'cancelled'
-        AND start_time < $3 AND end_time > $2
-        AND ($4 IS NULL OR id <> $4)`,
-    [serviceId, start.toISOString(), end.toISOString(), excludeBookingId ?? null]
+      WHERE service_id IN (${placeholders}) AND status <> 'cancelled'
+        AND start_time < $2 AND end_time > $1
+        AND ($3 IS NULL OR id <> $3)`,
+    [
+      start.toISOString(),
+      end.toISOString(),
+      excludeBookingId ?? null,
+      ...serviceIds,
+    ]
   );
   return Number(rows[0]?.seats ?? 0);
 }

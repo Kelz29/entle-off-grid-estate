@@ -5,10 +5,14 @@ import {
 } from "./car-wash";
 import { newBookingId } from "./booking-id";
 import type { BookingRow, BusinessRow, ServiceRow } from "./types";
-import { findOrCreateCustomer, getBooking } from "./repository";
+import {
+  findOrCreateCustomer,
+  getBooking,
+} from "./repository";
 import { query, withTransaction, type DbClient } from "@/lib/db";
 import { getPublicSiteContent } from "@/lib/content/get-public-content";
 import { carTypesFromContent } from "@/lib/content/car-wash-prices";
+import { cafePoolCapacity, isCafePoolService } from "./cafe-pool";
 
 export class SlotUnavailableError extends Error {
   constructor() {
@@ -171,7 +175,7 @@ const INSERT_PLACEHOLDERS =
 async function insertExclusive(a: InsertArgs): Promise<string> {
   return withTransaction(async (client) => {
     if (!a.skipCapacityCheck) {
-      await acquireSlotLock(client, a.service.id, a.startTime);
+      await acquireSlotLock(client, a.service, a.startTime);
 
       const overlapping = await countOverlapping(
         client,
@@ -191,18 +195,19 @@ async function insertExclusive(a: InsertArgs): Promise<string> {
 }
 
 async function insertShared(a: InsertArgs): Promise<string> {
+  const capacity = cafePoolCapacity(a.service.slug, a.service.capacity);
   return withTransaction(async (client) => {
     if (!a.skipCapacityCheck) {
-      await acquireSlotLock(client, a.service.id, a.startTime);
+      await acquireSlotLock(client, a.service, a.startTime);
 
-      const held = await slotHeld(client, a.service.id, a.startTime);
+      const held = await slotHeld(client, a.service, a.startTime);
       const used = await countOverlappingGuests(
         client,
-        a.service.id,
+        a.service,
         a.startTime,
         a.endTime
       );
-      if (used + held + a.guests > a.service.capacity) {
+      if (used + held + a.guests > capacity) {
         throw new SlotUnavailableError();
       }
     }
@@ -225,7 +230,7 @@ export async function rescheduleBooking(input: {
 
   if (service.exclusive) {
     await withTransaction(async (client) => {
-      await acquireSlotLock(client, service.id, newStart);
+      await acquireSlotLock(client, service, newStart);
       const overlapping = await countOverlapping(
         client,
         service.id,
@@ -241,17 +246,18 @@ export async function rescheduleBooking(input: {
       );
     });
   } else {
+    const capacity = cafePoolCapacity(service.slug, service.capacity);
     await withTransaction(async (client) => {
-      await acquireSlotLock(client, service.id, newStart);
-      const held = await slotHeld(client, service.id, newStart);
+      await acquireSlotLock(client, service, newStart);
+      const held = await slotHeld(client, service, newStart);
       const used = await countOverlappingGuests(
         client,
-        service.id,
+        service,
         newStart,
         newEnd,
         booking.id
       );
-      if (used + held + booking.guests > service.capacity) {
+      if (used + held + booking.guests > capacity) {
         throw new SlotUnavailableError();
       }
       await client.query(
@@ -324,17 +330,18 @@ export async function updateBookingGuests(input: {
       [booking.id, guests]
     );
   } else {
+    const capacity = cafePoolCapacity(service.slug, service.capacity);
     await withTransaction(async (client) => {
-      await acquireSlotLock(client, service.id, start);
-      const held = await slotHeld(client, service.id, start);
+      await acquireSlotLock(client, service, start);
+      const held = await slotHeld(client, service, start);
       const used = await countOverlappingGuests(
         client,
-        service.id,
+        service,
         start,
         end,
         booking.id
       );
-      if (used + held + guests > service.capacity) {
+      if (used + held + guests > capacity) {
         throw new SlotUnavailableError();
       }
       await client.query(
@@ -408,11 +415,13 @@ export async function updateBookingCars(input: {
 
 async function acquireSlotLock(
   client: DbClient,
-  serviceId: number,
+  service: ServiceRow,
   slotStart: Date
 ): Promise<void> {
   const slotEpoch = Math.floor(slotStart.getTime() / 1000);
-  const lockName = `eoe:slot:${serviceId}:${slotEpoch}`;
+  const lockName = isCafePoolService(service.slug)
+    ? `eoe:cafe-pool:${service.business_id}:${slotEpoch}`
+    : `eoe:slot:${service.id}:${slotEpoch}`;
   const { rows } = await client.query<{ locked: number | string }>(
     `SELECT GET_LOCK($1, 10) AS locked`,
     [lockName]
@@ -424,14 +433,40 @@ async function acquireSlotLock(
 
 async function slotHeld(
   client: DbClient,
-  serviceId: number,
+  service: ServiceRow,
   slotStart: Date
 ): Promise<number> {
+  if (isCafePoolService(service.slug)) {
+    const ids = await listCafePoolServiceIdsForClient(
+      client,
+      service.business_id
+    );
+    if (ids.length === 0) return 0;
+    const placeholders = ids.map((_, i) => `$${i + 2}`).join(", ");
+    const { rows } = await client.query<{ held: number | string }>(
+      `SELECT COALESCE(SUM(held_seats), 0) AS held FROM slot_overrides
+        WHERE service_id IN (${placeholders}) AND slot_start = $1`,
+      [slotStart.toISOString(), ...ids]
+    );
+    return Number(rows[0]?.held ?? 0);
+  }
   const { rows } = await client.query<{ held_seats: number }>(
     `SELECT held_seats FROM slot_overrides WHERE service_id = $1 AND slot_start = $2`,
-    [serviceId, slotStart.toISOString()]
+    [service.id, slotStart.toISOString()]
   );
   return rows[0]?.held_seats ?? 0;
+}
+
+async function listCafePoolServiceIdsForClient(
+  client: DbClient,
+  businessId: number
+): Promise<number[]> {
+  const { rows } = await client.query<{ id: number }>(
+    `SELECT id FROM services
+      WHERE business_id = $1 AND slug IN ($2, $3) AND is_active = 1`,
+    [businessId, "cafe-table-reservation", "cafe-table-car-wash"]
+  );
+  return rows.map((r) => r.id);
 }
 
 async function countOverlapping(
@@ -453,17 +488,22 @@ async function countOverlapping(
 
 async function countOverlappingGuests(
   client: DbClient,
-  serviceId: number,
+  service: ServiceRow,
   start: Date,
   end: Date,
   excludeBookingId?: string
 ): Promise<number> {
+  const ids = isCafePoolService(service.slug)
+    ? await listCafePoolServiceIdsForClient(client, service.business_id)
+    : [service.id];
+  if (ids.length === 0) return 0;
+  const placeholders = ids.map((_, i) => `$${i + 4}`).join(", ");
   const { rows } = await client.query<{ seats: number | string }>(
     `SELECT COALESCE(SUM(guests), 0) AS seats FROM bookings
-      WHERE service_id = $1 AND status <> 'cancelled'
-        AND start_time < $3 AND end_time > $2
-        AND ($4 IS NULL OR id <> $4)`,
-    [serviceId, start.toISOString(), end.toISOString(), excludeBookingId ?? null]
+      WHERE service_id IN (${placeholders}) AND status <> 'cancelled'
+        AND start_time < $2 AND end_time > $1
+        AND ($3 IS NULL OR id <> $3)`,
+    [start.toISOString(), end.toISOString(), excludeBookingId ?? null, ...ids]
   );
   return Number(rows[0]?.seats ?? 0);
 }

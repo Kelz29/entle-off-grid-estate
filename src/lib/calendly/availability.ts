@@ -1,6 +1,11 @@
 import type { BusinessRow, ServiceRow } from "./types";
 import { DEFAULT_BUSINESS_HOURS } from "./types";
-import { getActiveBookingsForService, getSlotHolds } from "./repository";
+import {
+  getActiveBookingsForServices,
+  getMergedSlotHolds,
+  listCafePoolServiceIds,
+} from "./repository";
+import { cafePoolCapacity, isCafePoolService } from "./cafe-pool";
 import {
   parseHhMm,
   wallTimeToUtc,
@@ -90,8 +95,15 @@ export function generateWindow(
   return { earliest, latest, durMs, candidates };
 }
 
-async function bookedIntervals(serviceId: number, from: Date, to: Date) {
-  const booked = await getActiveBookingsForService(serviceId, from, to);
+async function bookedIntervals(
+  service: ServiceRow,
+  from: Date,
+  to: Date
+) {
+  const serviceIds = isCafePoolService(service.slug)
+    ? await listCafePoolServiceIds(service.business_id)
+    : [service.id];
+  const booked = await getActiveBookingsForServices(serviceIds, from, to);
   return booked.map((b) => ({
     start: new Date(b.start_time).getTime(),
     end: new Date(b.end_time).getTime(),
@@ -126,8 +138,8 @@ export async function getSlotUsage(opts: {
   const win = generateWindow(business, service, windowStart, windowEnd, now);
   if (win.candidates.length === 0) return [];
 
-  const intervals = await bookedIntervals(service.id, win.earliest, win.latest);
-  const holds = await getSlotHolds(service.id, win.earliest, win.latest);
+  const intervals = await bookedIntervals(service, win.earliest, win.latest);
+  const holds = await getMergedSlotHolds(service, win.earliest, win.latest);
 
   const out: SlotUsage[] = [];
   for (const slot of win.candidates) {
@@ -135,7 +147,9 @@ export async function getSlotUsage(opts: {
     const e = s + win.durMs;
     const overlapping = intervals.filter((iv) => s < iv.end && e > iv.start);
     const iso = slot.toISOString();
-    const capacity = service.exclusive ? 1 : service.capacity;
+    const capacity = service.exclusive
+      ? 1
+      : cafePoolCapacity(service.slug, service.capacity);
     const held = service.exclusive ? 0 : holds.get(iso) ?? 0;
     const actual = service.exclusive
       ? overlapping.length > 0
@@ -178,7 +192,9 @@ export function computeSlotUsageFromIntervals(opts: {
     const e = s + win.durMs;
     const overlapping = intervals.filter((iv) => s < iv.end && e > iv.start);
     const iso = slot.toISOString();
-    const capacity = service.exclusive ? 1 : service.capacity;
+    const capacity = service.exclusive
+      ? 1
+      : cafePoolCapacity(service.slug, service.capacity);
     const held = service.exclusive ? 0 : holds.get(iso) ?? 0;
     const actual = service.exclusive
       ? overlapping.length > 0

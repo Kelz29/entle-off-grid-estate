@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import {
   getActiveBusiness,
-  getActiveBookingsForService,
+  getActiveBookingsForServices,
   getService,
+  listCafePoolServiceIds,
 } from "@/lib/calendly/repository";
 import { getAvailableSlots } from "@/lib/calendly/availability";
 import { serializeAvailableTime } from "@/lib/calendly/serializers";
 import { serviceIdFromEventType, BadEventTypeError } from "@/lib/calendly/config";
 import { parseIsoAssumeUtc } from "@/lib/calendly/time";
+import { isCafePoolService } from "@/lib/calendly/cafe-pool";
 import {
   degradedAvailableSlots,
   rememberBookingSnapshot,
@@ -81,19 +83,25 @@ export async function GET(request: Request) {
       return NextResponse.json({ detail: "Business not found" }, { status: 404 });
     }
 
-    const booked = await getActiveBookingsForService(
-      service.id,
-      start,
-      end
-    );
-    rememberBookingSnapshot({
-      bookedForService: {
-        serviceId: service.id,
-        rows: booked,
-        from: start,
-        to: end,
-      },
-    });
+    const poolIds = isCafePoolService(service.slug)
+      ? await listCafePoolServiceIds(service.business_id)
+      : [service.id];
+    const booked = await getActiveBookingsForServices(poolIds, start, end);
+    for (const id of poolIds) {
+      const rows = booked.filter((b) => b.service_id === id);
+      rememberBookingSnapshot({
+        bookedForService: {
+          serviceId: id,
+          rows: rows.map(({ start_time, end_time, guests }) => ({
+            start_time,
+            end_time,
+            guests,
+          })),
+          from: start,
+          to: end,
+        },
+      });
+    }
 
     const slots = await getAvailableSlots({
       business,

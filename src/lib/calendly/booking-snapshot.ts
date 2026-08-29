@@ -2,6 +2,7 @@ import {
   computeSlotUsageFromIntervals,
   type BookedInterval,
 } from "./availability";
+import { isCafePoolService } from "./cafe-pool";
 import type { BusinessRow, ServiceRow } from "./types";
 
 export type SnapshotBookedRow = {
@@ -66,7 +67,7 @@ function bundledService(
     is_active: true,
     is_available_online: true,
     exclusive: false,
-    capacity: 50,
+    capacity: 20,
     created_at: "2020-01-01T00:00:00.000Z",
     updated_at: "2020-01-01T00:00:00.000Z",
   };
@@ -174,26 +175,35 @@ export function snapshotService(serviceId: number): ServiceRow | null {
   return bundledSnapshot().services.find((s) => s.id === serviceId) ?? null;
 }
 
+function poolServiceIds(service: ServiceRow, snap: BookingSnapshot): number[] {
+  if (!isCafePoolService(service.slug)) return [service.id];
+  const ids = snap.services
+    .filter((s) => isCafePoolService(s.slug))
+    .map((s) => s.id);
+  return ids.length > 0 ? ids : [service.id];
+}
+
 function bookedIntervalsForService(
-  serviceId: number,
+  service: ServiceRow,
   from: Date,
   to: Date
 ): BookedInterval[] {
   const snap = getBookingSnapshot();
-  const rows = snap.bookedByService[serviceId] ?? [];
+  const serviceIds = poolServiceIds(service, snap);
   const fromMs = from.getTime();
   const toMs = to.getTime();
-  return rows
-    .filter((r) => {
+  const out: BookedInterval[] = [];
+  for (const serviceId of serviceIds) {
+    const rows = snap.bookedByService[serviceId] ?? [];
+    for (const r of rows) {
       const s = new Date(r.start_time).getTime();
       const e = new Date(r.end_time).getTime();
-      return s < toMs && e > fromMs;
-    })
-    .map((r) => ({
-      start: new Date(r.start_time).getTime(),
-      end: new Date(r.end_time).getTime(),
-      guests: r.guests,
-    }));
+      if (s < toMs && e > fromMs) {
+        out.push({ start: s, end: e, guests: r.guests });
+      }
+    }
+  }
+  return out;
 }
 
 export function degradedAvailableSlots(opts: {
@@ -206,7 +216,7 @@ export function degradedAvailableSlots(opts: {
   const winStart = opts.windowStart;
   const winEnd = opts.windowEnd;
   const intervals = bookedIntervalsForService(
-    opts.service.id,
+    opts.service,
     winStart,
     winEnd
   );
