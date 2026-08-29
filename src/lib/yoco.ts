@@ -31,12 +31,17 @@ function secretKey(): string {
   if (!key) throw new YocoError("YOCO_SECRET_KEY is not configured on the server");
   if (key.startsWith("whsec_")) {
     throw new YocoError(
-      "YOCO_SECRET_KEY looks like a webhook secret — use sk_live_… or sk_test_… from Payment Gateway"
+      "YOCO_SECRET_KEY is set to your webhook secret (whsec_…). Use the Checkout API secret key (sk_live_…) in YOCO_SECRET_KEY instead; put whsec_… in YOCO_WEBHOOK_SECRET."
+    );
+  }
+  if (/^pk_(live|test)_/.test(key)) {
+    throw new YocoError(
+      "YOCO_SECRET_KEY is set to your public key (pk_live_…). Use the secret key (sk_live_…) from Yoco app → Sales → e-Commerce → Checkout API → How to connect."
     );
   }
   if (!/^sk_(live|test)_/.test(key)) {
     throw new YocoError(
-      "YOCO_SECRET_KEY must start with sk_live_ or sk_test_ (Sales → Payment Gateway → Online)"
+      "YOCO_SECRET_KEY must be the Checkout API secret key (sk_live_… or sk_test_…), from Yoco app → Sales → e-Commerce → Checkout API → How to connect — not a public key or webhook secret."
     );
   }
   return key;

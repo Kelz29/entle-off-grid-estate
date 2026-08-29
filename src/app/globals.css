@@ -46,6 +46,9 @@ html {
   font-weight: 500;
 }
 
+/* react-datepicker base styles (overridden below for .booking-calendar) */
+@import "react-datepicker/dist/react-datepicker.css";
+
 /* Booking calendar sizing + aesthetics */
 .booking-calendar {
   height: 100%;

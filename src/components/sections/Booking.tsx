@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState, cloneElement, isValidElement } from "react";
 import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   CAR_TYPES,
@@ -21,6 +20,11 @@ import {
   phoneError,
 } from "@/lib/contact-validation";
 import { AnalyticsEvents, trackEvent } from "@/lib/analytics";
+import {
+  bookingPhoneOnly,
+  BOOKING_PHONE,
+  BOOKING_PHONE_HREF,
+} from "@/lib/booking-config";
 
 const BUSINESS_ID = process.env.NEXT_PUBLIC_BUSINESS_ID ?? "1";
 const DEFAULT_CAR_TYPE: CarTypeId = "sedan";
@@ -104,17 +108,20 @@ export function Booking() {
   } | null>(null);
   // Non-refundable deposit notice shown before handing off to Yoco.
   const [confirmPay, setConfirmPay] = useState(false);
+  const [callToBook, setCallToBook] = useState(false);
+  const phoneOnly = bookingPhoneOnly();
 
   useEffect(() => {
-    if (!confirmPay && !seatWarn) return;
+    if (!confirmPay && !seatWarn && !callToBook) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (confirmPay) setConfirmPay(false);
       if (seatWarn) setSeatWarn(null);
+      if (callToBook) setCallToBook(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [confirmPay, seatWarn]);
+  }, [confirmPay, seatWarn, callToBook]);
 
   const guestCount = Math.max(1, Math.trunc(Number(guests)) || 1);
   const needsCars = isCarWashService(service?.slug);
@@ -220,6 +227,14 @@ export function Booking() {
       return;
     }
     setError(null);
+    if (phoneOnly) {
+      trackEvent(AnalyticsEvents.BookingDetailsOpened, {
+        service: service.name,
+        mode: "phone_only",
+      });
+      setCallToBook(true);
+      return;
+    }
     setConfirmPay(true);
     trackEvent(AnalyticsEvents.BookingPayIntent, {
       service: service.name,
@@ -334,15 +349,44 @@ export function Booking() {
             Pick a space, pick a time.
           </h2>
           <p className="mt-4 max-w-md text-sm leading-relaxed text-eoe-ink/90">
-            Choose an experience, select an available slot, and we&apos;ll hold
-            it for you. Bookings run{" "}
-            <span className="font-medium text-eoe-espresso">
-              Friday to Sunday, 11:00 to 18:00
-            </span>
-            . A R100 per guest deposit secures your slot and comes off your
-            bill on the day, plus a R30 platform fee. Cafe with car wash adds
-            the wash minimum for each car by type.
+            {phoneOnly ? (
+              <>
+                Choose an experience and time below, then{" "}
+                <span className="font-medium text-eoe-espresso">
+                  call us to confirm
+                </span>
+                . Online card payment is under maintenance. Bookings run{" "}
+                <span className="font-medium text-eoe-espresso">
+                  Friday to Sunday, 11:00 to 18:00
+                </span>
+                .
+              </>
+            ) : (
+              <>
+                Choose an experience, select an available slot, and we&apos;ll hold
+                it for you. Bookings run{" "}
+                <span className="font-medium text-eoe-espresso">
+                  Friday to Sunday, 11:00 to 18:00
+                </span>
+                . A R100 per guest deposit secures your slot and comes off your
+                bill on the day, plus a R30 platform fee. Cafe with car wash adds
+                the wash minimum for each car by type.
+              </>
+            )}
           </p>
+          {phoneOnly && (
+            <p className="mt-3 max-w-md rounded-2xl border border-eoe-espresso/15 bg-eoe-espresso/5 px-4 py-3 text-sm text-eoe-espresso">
+              Call{" "}
+              <a
+                href={BOOKING_PHONE_HREF}
+                onClick={() => trackEvent(AnalyticsEvents.ContactPhone)}
+                className="font-semibold underline underline-offset-2"
+              >
+                {BOOKING_PHONE}
+              </a>{" "}
+              to book — have your chosen date, time, and guest count ready.
+            </p>
+          )}
         </div>
 
         <motion.div
@@ -606,21 +650,39 @@ export function Booking() {
                     disabled={submitting}
                     className="mt-6 inline-flex items-center justify-center rounded-full bg-eoe-espresso px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-ivory hover:bg-eoe-espresso/90 disabled:cursor-not-allowed disabled:bg-eoe-espresso/40"
                   >
-                    {submitting
-                      ? "Redirecting to Yoco…"
-                      : `Pay ${money(depositTotal)} deposit & confirm`}
+                    {phoneOnly
+                      ? "Continue — call to confirm"
+                      : submitting
+                        ? "Redirecting to Yoco…"
+                        : `Pay ${money(depositTotal)} deposit & confirm`}
                   </button>
                   <p className="mt-3 text-[11px] text-eoe-espresso/70">
-                    Your {money(depositTotal)} total (
-                    {money(service.price_cents)} × {guestCount}{" "}
-                    {guestCount === 1 ? "guest" : "guests"}
-                    {needsCars && washMinimum > 0
-                      ? ` + ${money(washMinimum)} car wash minimum`
-                      : ""}
-                    {` + ${money(PLATFORM_FEE_CENTS)} platform fee`}
-                    ). The deposit portion comes off your bill on arrival.
-                    You&apos;ll be taken to Yoco&apos;s secure checkout. Test
-                    card 4111 1111 1111 1111, any future expiry &amp; CVV.
+                    {phoneOnly ? (
+                      <>
+                        Pick your slot above, then call{" "}
+                        <a
+                          href={BOOKING_PHONE_HREF}
+                          onClick={() => trackEvent(AnalyticsEvents.ContactPhone)}
+                          className="font-medium text-eoe-espresso underline underline-offset-2"
+                        >
+                          {BOOKING_PHONE}
+                        </a>{" "}
+                        with your name, party size, and any special requests.
+                      </>
+                    ) : (
+                      <>
+                        Your {money(depositTotal)} total (
+                        {money(service.price_cents)} × {guestCount}{" "}
+                        {guestCount === 1 ? "guest" : "guests"}
+                        {needsCars && washMinimum > 0
+                          ? ` + ${money(washMinimum)} car wash minimum`
+                          : ""}
+                        {` + ${money(PLATFORM_FEE_CENTS)} platform fee`}
+                        ). The deposit portion comes off your bill on arrival.
+                        You&apos;ll be taken to Yoco&apos;s secure checkout. Test
+                        card 4111 1111 1111 1111, any future expiry &amp; CVV.
+                      </>
+                    )}
                   </p>
                   {error && (
                     <p className="mt-3 text-[12px] text-rose-600" role="alert" aria-live="polite">
@@ -689,6 +751,95 @@ export function Booking() {
                 </button>
                 <button
                   onClick={() => setConfirmPay(false)}
+                  className="rounded-full border border-eoe-espresso/20 px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-espresso hover:bg-eoe-ivory"
+                >
+                  Go back
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Call to confirm — while online checkout is paused */}
+      <AnimatePresence>
+        {callToBook && service && slot && (
+          <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="call-to-book-title"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setCallToBook(false)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-eoe-ink/45 px-4 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 8 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 8 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm rounded-3xl border border-eoe-espresso/10 bg-white p-7 text-center shadow-2xl"
+            >
+              <div
+                className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-eoe-espresso/10 text-2xl"
+                aria-hidden
+              >
+                📞
+              </div>
+              <h4
+                id="call-to-book-title"
+                className="mt-4 font-display text-2xl tracking-wide text-eoe-espresso"
+              >
+                Call to confirm
+              </h4>
+              <p className="mt-2 text-sm leading-relaxed text-eoe-ink/85">
+                Online payment is being set up. Call us with the details below
+                and we&apos;ll secure your booking.
+              </p>
+              <ul className="mt-4 space-y-1.5 text-left text-sm text-eoe-espresso">
+                <li>
+                  <span className="text-eoe-espresso/70">Experience · </span>
+                  {service.name}
+                </li>
+                {dateLabel && (
+                  <li>
+                    <span className="text-eoe-espresso/70">Date · </span>
+                    {dateLabel}
+                  </li>
+                )}
+                <li>
+                  <span className="text-eoe-espresso/70">Time · </span>
+                  {wallTime(slot.start_time)}
+                </li>
+                <li>
+                  <span className="text-eoe-espresso/70">Guests · </span>
+                  {guestCount}
+                </li>
+                {name.trim() && (
+                  <li>
+                    <span className="text-eoe-espresso/70">Name · </span>
+                    {name.trim()}
+                  </li>
+                )}
+              </ul>
+              <div className="mt-6 flex flex-col gap-2">
+                <a
+                  href={BOOKING_PHONE_HREF}
+                  onClick={() => {
+                    trackEvent(AnalyticsEvents.ContactPhone, {
+                      source: "booking_phone_only",
+                    });
+                    setCallToBook(false);
+                  }}
+                  className="rounded-full bg-eoe-espresso px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-ivory hover:bg-eoe-espresso/90"
+                >
+                  Call {BOOKING_PHONE}
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setCallToBook(false)}
                   className="rounded-full border border-eoe-espresso/20 px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-espresso hover:bg-eoe-ivory"
                 >
                   Go back

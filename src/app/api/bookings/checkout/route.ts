@@ -31,6 +31,7 @@ import {
   trackServerEvent,
 } from "@/lib/analytics-server";
 import { checkoutReturnOrigin } from "@/lib/checkout-return-origin";
+import { isBookingCheckoutDisabled } from "@/lib/booking-config";
 
 /**
  * Start a paid booking (Yoco hosted Checkout). Sequence:
@@ -40,6 +41,16 @@ import { checkoutReturnOrigin } from "@/lib/checkout-return-origin";
  * Payment is confirmed later by the webhook (POST /api/payments/yoco/webhook).
  */
 export async function POST(request: Request) {
+  if (isBookingCheckoutDisabled()) {
+    return NextResponse.json(
+      {
+        detail:
+          "Online payment is under maintenance. Please call 067 366 2302 to book.",
+      },
+      { status: 503 }
+    );
+  }
+
   const rl = rateLimit(`checkout:${clientIp(request)}`, {
     limit: 20,
     windowMs: 15 * 60 * 1000,
