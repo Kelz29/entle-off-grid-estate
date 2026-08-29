@@ -7,7 +7,7 @@ VALUES (
   'Entle Off-Grid Estate',
   'entle-off-grid-estate',
   'Africa/Johannesburg',
-  '183 Lakeview, Bloemfontein, South Africa',
+  '182 Lakeview Bloemfontein, South Africa',
   60,
   '{
      "business_hours": {

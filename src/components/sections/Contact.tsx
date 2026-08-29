@@ -63,10 +63,10 @@ export function Contact() {
             </div>
             <div>
               <p className="text-xs uppercase tracking-[0.22em] text-eoe-ivory/80">
-                Hours
+                Cafe Office Hours
               </p>
               <p className="mt-1 text-eoe-ivory">
-                Mon to Sun · 8:00 to 16:30
+                Mon to Fri · 8:00 to 16:30
               </p>
             </div>
           </div>
@@ -75,7 +75,7 @@ export function Contact() {
               Find us
             </p>
             <p className="text-eoe-ivory">
-              183 Lakeview,
+              182 Lakeview
               <br />
               Bloemfontein, South Africa
             </p>

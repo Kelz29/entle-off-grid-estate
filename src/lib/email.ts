@@ -103,7 +103,7 @@ function renderEmail(opts: {
             }
           </td></tr>
           <tr><td style="padding:18px 32px;border-top:1px solid #f0eae4;color:#9a8a82;font-size:12px;">
-            183 Lakeview, Bloemfontein · 067 366 2302 · Fri to Sun, 11:00 to 18:00
+            182 Lakeview Bloemfontein · 067 366 2302 · Fri to Sun, 11:00 to 18:00
           </td></tr>
         </table>
       </td></tr>
@@ -122,7 +122,7 @@ function textFallback(
     .map(([k, v]) => `${k}: ${v}`)
     .join(
       "\n"
-    )}${outroText}\n\nEntle Off Grid Estate · 183 Lakeview, Bloemfontein · ${PHONE}`;
+    )}${outroText}\n\nEntle Off Grid Estate · 182 Lakeview Bloemfontein · ${PHONE}`;
 }
 
 async function send(to: string, subject: string, heading: string, intro: string, rows: [string, string][], outro?: string): Promise<void> {
@@ -261,7 +261,7 @@ function prepareMarketingMail(input: {
             <p style="margin:18px 0 0;color:#6a5a52;font-size:13px;line-height:1.6;">${CALL_CTA}</p>
           </td></tr>
           <tr><td style="padding:18px 32px;border-top:1px solid #f0eae4;color:#9a8a82;font-size:12px;">
-            183 Lakeview, Bloemfontein · 067 366 2302 · Fri to Sun, 11:00 to 18:00
+            182 Lakeview Bloemfontein · 067 366 2302 · Fri to Sun, 11:00 to 18:00
           </td></tr>
         </table>
       </td></tr>
