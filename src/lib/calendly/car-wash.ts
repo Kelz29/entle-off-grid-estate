@@ -24,9 +24,18 @@ export function carTypeLabel(id: string): string {
 }
 
 /** Sum of wash minimums for the selected car types. */
-export function carWashMinimumCents(carTypes: string[]): number {
+export type CarTypeCatalog = ReadonlyArray<{
+  id: string;
+  label: string;
+  min_cents: number;
+}>;
+
+export function carWashMinimumCents(
+  carTypes: string[],
+  catalog: CarTypeCatalog = CAR_TYPES
+): number {
   return carTypes.reduce((sum, id) => {
-    const t = carTypeById(id);
+    const t = catalog.find((x) => x.id === id) ?? carTypeById(id);
     return sum + (t?.min_cents ?? 0);
   }, 0);
 }

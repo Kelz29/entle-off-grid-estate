@@ -7,6 +7,8 @@ import { newBookingId } from "./booking-id";
 import type { BookingRow, BusinessRow, ServiceRow } from "./types";
 import { findOrCreateCustomer, getBooking } from "./repository";
 import { query, withTransaction, type DbClient } from "@/lib/db";
+import { getPublicSiteContent } from "@/lib/content/get-public-content";
+import { carTypesFromContent } from "@/lib/content/car-wash-prices";
 
 export class SlotUnavailableError extends Error {
   constructor() {
@@ -47,6 +49,10 @@ export async function createScheduledEvent(input: {
   notes?: string | null;
   specialRequest?: string | null;
   status?: "active" | "pending";
+  /** Pre-assigned id (deferred checkout recovery). */
+  bookingId?: string;
+  /** Skip overlap / capacity checks (conflict recovery). */
+  skipCapacityCheck?: boolean;
 }): Promise<BookingRow> {
   const { business, service, startTime, invitee } = input;
 
@@ -93,7 +99,7 @@ export async function createScheduledEvent(input: {
   });
 
   const insertArgs = {
-    id: newBookingId(),
+    id: input.bookingId ?? newBookingId(),
     business,
     service,
     customerId,
@@ -106,6 +112,7 @@ export async function createScheduledEvent(input: {
     notes: input.notes ?? null,
     specialRequest: input.specialRequest ?? null,
     status,
+    skipCapacityCheck: input.skipCapacityCheck ?? false,
   };
   const id = service.exclusive
     ? await insertExclusive(insertArgs)
@@ -130,6 +137,7 @@ type InsertArgs = {
   notes: string | null;
   specialRequest: string | null;
   status: "active" | "pending";
+  skipCapacityCheck: boolean;
 };
 
 const INSERT_COLS = `(id, business_id, service_id, customer_id, start_time, end_time,
@@ -162,15 +170,17 @@ const INSERT_PLACEHOLDERS =
 
 async function insertExclusive(a: InsertArgs): Promise<string> {
   return withTransaction(async (client) => {
-    await acquireSlotLock(client, a.service.id, a.startTime);
+    if (!a.skipCapacityCheck) {
+      await acquireSlotLock(client, a.service.id, a.startTime);
 
-    const overlapping = await countOverlapping(
-      client,
-      a.service.id,
-      a.startTime,
-      a.endTime
-    );
-    if (overlapping > 0) throw new SlotUnavailableError();
+      const overlapping = await countOverlapping(
+        client,
+        a.service.id,
+        a.startTime,
+        a.endTime
+      );
+      if (overlapping > 0) throw new SlotUnavailableError();
+    }
 
     await client.query(
       `INSERT INTO bookings ${INSERT_COLS} VALUES ${INSERT_PLACEHOLDERS}`,
@@ -182,17 +192,19 @@ async function insertExclusive(a: InsertArgs): Promise<string> {
 
 async function insertShared(a: InsertArgs): Promise<string> {
   return withTransaction(async (client) => {
-    await acquireSlotLock(client, a.service.id, a.startTime);
+    if (!a.skipCapacityCheck) {
+      await acquireSlotLock(client, a.service.id, a.startTime);
 
-    const held = await slotHeld(client, a.service.id, a.startTime);
-    const used = await countOverlappingGuests(
-      client,
-      a.service.id,
-      a.startTime,
-      a.endTime
-    );
-    if (used + held + a.guests > a.service.capacity) {
-      throw new SlotUnavailableError();
+      const held = await slotHeld(client, a.service.id, a.startTime);
+      const used = await countOverlappingGuests(
+        client,
+        a.service.id,
+        a.startTime,
+        a.endTime
+      );
+      if (used + held + a.guests > a.service.capacity) {
+        throw new SlotUnavailableError();
+      }
     }
 
     await client.query(
@@ -277,7 +289,15 @@ async function markPartialIfOwesMore(
   })();
   const nextCars = nextCarTypes ?? [];
   const guestsUp = nextGuests > booking.guests;
-  const washUp = carWashMinimumCents(nextCars) > carWashMinimumCents(prevCars);
+  let catalog = undefined as ReturnType<typeof carTypesFromContent> | undefined;
+  try {
+    catalog = carTypesFromContent(await getPublicSiteContent());
+  } catch {
+    catalog = undefined;
+  }
+  const washUp =
+    carWashMinimumCents(nextCars, catalog) >
+    carWashMinimumCents(prevCars, catalog);
   const carsUp = nextCars.length > prevCars.length;
   if (!guestsUp && !washUp && !carsUp) return;
   await query(

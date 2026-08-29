@@ -1,11 +1,11 @@
 "use client";
 
 import { motion } from "framer-motion";
-import Image from "next/image";
-import { spaces } from "@/lib/media";
+import { ContentImage } from "@/components/ui/ContentImage";
 import { MobileScrollStrip, mobileScrollSlide } from "@/components/ui/MobileScrollStrip";
+import type { ResolvedMedia, SpacesContent } from "@/lib/content/types";
 
-export function Spaces() {
+export function Spaces({ content }: { content: SpacesContent<ResolvedMedia> }) {
   return (
     <section
       id="spaces"
@@ -14,16 +14,20 @@ export function Spaces() {
       <div className="mx-auto max-w-6xl">
         <div className="mb-10 flex items-baseline justify-between gap-6">
           <div>
-            <p className="text-xs tracking-[0.3em] text-eoe-espresso">SPACES</p>
+            <p className="text-xs tracking-[0.3em] text-eoe-espresso">
+              {content.eyebrow}
+            </p>
             <h2 className="mt-3 font-display text-3xl tracking-[0.18em] text-eoe-espresso md:text-4xl">
-              Spaces for every
-              <br />
-              kind of gathering.
+              {content.titleLines.map((line, i) => (
+                <span key={`${line}-${i}`}>
+                  {i > 0 && <br />}
+                  {line}
+                </span>
+              ))}
             </h2>
           </div>
           <p className="hidden max-w-sm text-sm leading-relaxed text-eoe-ink/90 md:block">
-            Choose from our cafe, venue hall, or open garden. Each space can be
-            tailored with our in house styling partners and preferred suppliers.
+            {content.intro}
           </p>
         </div>
 
@@ -31,9 +35,9 @@ export function Spaces() {
           outerClassName="md:mx-0 md:overflow-visible md:pl-0"
           trackClassName="gap-5 md:grid md:w-full md:max-w-none md:grid-cols-3 md:gap-6 md:snap-none md:pr-0 md:pb-0"
         >
-          {spaces.map((space, index) => (
+          {content.items.map((space, index) => (
             <motion.article
-              key={space.title}
+              key={`${space.title}-${index}`}
               initial={{ opacity: 0, y: 40 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, amount: 0.3 }}
@@ -41,8 +45,9 @@ export function Spaces() {
               className={`group relative overflow-hidden rounded-3xl border border-eoe-espresso/10 ${mobileScrollSlide} md:min-w-0`}
             >
               <div className="relative aspect-[3/4] overflow-hidden">
-                <Image
-                  src={space.src}
+                <ContentImage
+                  src={space.image.src}
+                  fallbackSrc={space.image.fallbackSrc}
                   alt={space.alt}
                   fill
                   sizes="(min-width: 768px) 33vw, 80vw"
@@ -63,7 +68,7 @@ export function Spaces() {
                     href="#booking"
                     className="mt-2 inline-flex items-center text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-ivory hover:text-eoe-gold"
                   >
-                    Enquire
+                    {content.enquireLabel}
                     <span className="ml-2 h-px w-6 bg-eoe-ivory/50 transition-all group-hover:w-10 group-hover:bg-eoe-gold" />
                   </a>
                 </div>

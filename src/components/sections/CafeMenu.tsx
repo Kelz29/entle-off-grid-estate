@@ -4,11 +4,11 @@ import { useState } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  MENU_CATEGORIES,
   formatZar,
   type MenuCategory,
 } from "@/lib/menu";
 import { ENTLE_MARK_SRC } from "@/components/ui/EntleMark";
+import type { MenuCategoryContent } from "@/lib/content/types";
 
 function MenuPanel({ category }: { category: MenuCategory }) {
   return (
@@ -60,14 +60,36 @@ function MenuPanel({ category }: { category: MenuCategory }) {
   );
 }
 
+function toMenuCategory(cat: MenuCategoryContent): MenuCategory {
+  return {
+    id: cat.id as MenuCategory["id"],
+    label: cat.label,
+    sections: cat.sections.map((section) => ({
+      id: section.id,
+      title: section.title,
+      accent: section.accent || undefined,
+      sides: section.sides || undefined,
+      items: section.items.map((item) => ({
+        name: item.name,
+        price: item.price,
+        description: item.description || undefined,
+      })),
+    })),
+  };
+}
+
 export function CafeMenu({
   initialTab = "breakfast",
+  categories,
+  footerNote,
 }: {
   initialTab?: MenuCategory["id"];
+  categories: MenuCategoryContent[];
+  footerNote?: string;
 }) {
-  const [tab, setTab] = useState<MenuCategory["id"]>(initialTab);
-  const active =
-    MENU_CATEGORIES.find((c) => c.id === tab) ?? MENU_CATEGORIES[0];
+  const tabs = categories.map(toMenuCategory);
+  const [tab, setTab] = useState<string>(initialTab);
+  const active = tabs.find((c) => c.id === tab) ?? tabs[0];
 
   return (
     <div
@@ -133,7 +155,7 @@ export function CafeMenu({
           aria-label="Menu sections"
           className="mt-8 flex flex-wrap justify-center gap-2"
         >
-          {MENU_CATEGORIES.map((c) => {
+          {tabs.map((c) => {
             const selected = c.id === tab;
             return (
               <button
@@ -183,7 +205,8 @@ export function CafeMenu({
             />
           </span>
           <p className="text-center font-display text-base italic tracking-wide text-eoe-espresso/70 sm:text-lg">
-            Prices subject to change. Ask your host about today&apos;s specials.
+            {footerNote ??
+              "Prices subject to change. Ask your host about today's specials."}
           </p>
         </div>
       </div>

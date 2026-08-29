@@ -3,6 +3,7 @@ import { getServerSession } from "@/lib/admin-auth";
 import {
   canAccessSection,
   canBroadcast,
+  canManageContent,
   canManageSeats,
   canManageSpecials,
   canManageUsers,
@@ -27,6 +28,7 @@ export async function GET() {
       broadcast: canBroadcast(role),
       seats: canManageSeats(role),
       specials: canManageSpecials(role),
+      content: canManageContent(role),
       payments: canAccessSection(role, "payments" as AdminSection),
       clients: canAccessSection(role, "clients" as AdminSection),
     },

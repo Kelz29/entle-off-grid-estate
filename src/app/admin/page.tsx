@@ -20,6 +20,7 @@ import {
   type AdminRole,
   type AdminSection as RoleSection,
 } from "@/lib/admin-roles";
+import { ContentPanel } from "@/components/admin/content/ContentPanel";
 
 const BUSINESS_ID = process.env.NEXT_PUBLIC_BUSINESS_ID ?? "1";
 const VENUE_TZ = "Africa/Johannesburg";
@@ -175,6 +176,7 @@ const NAV: { id: AdminSection; label: string; hint: string }[] = [
   { id: "payments", label: "Payments", hint: "Deposits and dues" },
   { id: "clients", label: "Clients", hint: "Guest emails" },
   { id: "specials", label: "Specials", hint: "Home invitation flyer" },
+  { id: "content", label: "Manage content", hint: "Copy, menu, and media" },
   { id: "seats", label: "Seats", hint: "Capacity and holds" },
   { id: "users", label: "Users", hint: "Staff accounts and roles" },
 ];
@@ -189,6 +191,7 @@ type MeResponse = {
     broadcast: boolean;
     seats: boolean;
     specials: boolean;
+    content?: boolean;
     payments: boolean;
     clients: boolean;
   };
@@ -591,7 +594,7 @@ export default function AdminPage() {
   };
 
   return (
-    <div className="min-h-screen bg-eoe-ivory text-eoe-ink md:flex">
+    <div className="h-dvh overflow-hidden bg-eoe-ivory text-eoe-ink md:pl-64 lg:pl-72">
       {/* Mobile nav backdrop */}
       {navOpen && (
         <button
@@ -602,13 +605,13 @@ export default function AdminPage() {
         />
       )}
 
-      {/* Sidebar */}
+      {/* Sidebar stays fixed; only the right pane scrolls */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[min(18rem,88vw)] flex-col border-r border-eoe-espresso/10 bg-white transition-transform md:static md:w-64 md:translate-x-0 lg:w-72 ${
-          navOpen ? "translate-x-0" : "-translate-x-full"
+        className={`fixed inset-y-0 left-0 z-50 flex h-dvh w-[min(18rem,88vw)] flex-col border-r border-eoe-espresso/10 bg-white transition-transform md:w-64 lg:w-72 ${
+          navOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         }`}
       >
-        <div className="border-b border-eoe-espresso/10 px-5 py-5 md:py-6">
+        <div className="shrink-0 border-b border-eoe-espresso/10 px-5 py-4 md:py-5">
           <div className="flex items-start justify-between gap-2">
             <div>
               <p
@@ -640,7 +643,11 @@ export default function AdminPage() {
             </p>
           )}
         </div>
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
+        <nav
+          className={`min-h-0 flex-1 space-y-0.5 px-3 py-3 md:space-y-1 md:overflow-hidden md:py-4 ${
+            navOpen ? "overflow-y-auto overscroll-contain" : "overflow-hidden"
+          }`}
+        >
           {navItems.map((item) => {
             const active = section === item.id;
             return (
@@ -648,7 +655,7 @@ export default function AdminPage() {
                 key={item.id}
                 type="button"
                 onClick={() => go(item.id)}
-                className={`flex min-h-12 w-full flex-col justify-center rounded-2xl px-3.5 py-3 text-left transition ${
+                className={`flex min-h-11 w-full flex-col justify-center rounded-2xl px-3.5 py-2.5 text-left transition md:min-h-10 md:py-2 ${
                   active
                     ? "bg-eoe-espresso text-eoe-ivory"
                     : "text-eoe-ink/80 hover:bg-eoe-ivory"
@@ -658,7 +665,7 @@ export default function AdminPage() {
                   {item.label}
                 </span>
                 <span
-                  className={`mt-0.5 text-[11px] ${
+                  className={`mt-0.5 hidden text-[11px] lg:block ${
                     active ? "text-eoe-ivory/70" : "text-eoe-espresso/70"
                   }`}
                 >
@@ -668,7 +675,7 @@ export default function AdminPage() {
             );
           })}
         </nav>
-        <div className="space-y-2 border-t border-eoe-espresso/10 px-3 py-4">
+        <div className="shrink-0 space-y-2 border-t border-eoe-espresso/10 px-3 py-3 md:py-4">
           <a
             href="/"
             target="_blank"
@@ -701,9 +708,8 @@ export default function AdminPage() {
         </div>
       </aside>
 
-      {/* Main */}
-      <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-3 border-b border-eoe-espresso/10 bg-eoe-ivory/95 px-3 py-3 backdrop-blur sm:px-4 sm:py-4 md:px-8">
+      <div className="flex h-dvh min-w-0 flex-col">
+        <header className="z-30 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-eoe-espresso/10 bg-eoe-ivory/95 px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur sm:px-4 sm:py-4 md:px-8">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <button
               type="button"
@@ -749,7 +755,7 @@ export default function AdminPage() {
           </div>
         </header>
 
-        <main className="px-3 py-6 sm:px-4 sm:py-8 md:px-8">
+        <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-8 md:px-8">
           {showNew && (
             <NewBookingModal
               types={types}
@@ -772,6 +778,8 @@ export default function AdminPage() {
               Failed to load bookings.
             </p>
           )}
+
+          <DeferredBookingsAlert />
 
           {section === "overview" && (
             <div className="space-y-8">
@@ -1045,6 +1053,10 @@ export default function AdminPage() {
 
           {section === "specials" && canAccessSection(role, "specials") && (
             <SpecialsPanel />
+          )}
+
+          {section === "content" && canAccessSection(role, "content") && (
+            <ContentPanel />
           )}
 
           {section === "seats" && canAccessSection(role, "seats") && (
@@ -1919,6 +1931,77 @@ function ChangePasswordModal({
           </form>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------- deferred / offline booking recovery ----------
+type DeferredRow = {
+  id: string;
+  status: string;
+  guest_name?: string;
+  guest_email?: string;
+  start_time?: string;
+  guests?: number;
+  created_at: string;
+};
+
+function DeferredBookingsAlert() {
+  const { data, mutate } = useSWR<{ collection?: DeferredRow[] }>(
+    "/api/admin/deferred-bookings",
+    fetcher,
+    { refreshInterval: 60_000 }
+  );
+  const rows = data?.collection ?? [];
+  const conflicts = rows.filter((r) => r.status === "conflict");
+  const pending = rows.filter((r) => r.status === "pending");
+  const [syncing, setSyncing] = useState(false);
+
+  if (!conflicts.length && !pending.length) return null;
+
+  async function syncNow() {
+    setSyncing(true);
+    try {
+      await adminFetch("/api/admin/deferred-bookings", { method: "POST" });
+      await mutate();
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  return (
+    <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-eoe-ink">
+      <p className="font-medium text-eoe-espresso">
+        Offline booking recovery
+      </p>
+      {pending.length > 0 && (
+        <p className="mt-1 text-eoe-ink/90">
+          {pending.length} paid booking{pending.length === 1 ? "" : "s"} waiting
+          to sync from Yoco.
+        </p>
+      )}
+      {conflicts.length > 0 && (
+        <ul className="mt-2 space-y-1 text-eoe-ink/90">
+          {conflicts.slice(0, 5).map((r) => (
+            <li key={r.id}>
+              <span className="font-medium text-amber-900">Conflict</span> ·{" "}
+              {r.guest_name ?? "Guest"} · {r.start_time ?? "—"} · {r.guests ?? 1}{" "}
+              guest{(r.guests ?? 1) === 1 ? "" : "s"}
+            </li>
+          ))}
+          {conflicts.length > 5 && (
+            <li className="text-eoe-ink/70">+{conflicts.length - 5} more</li>
+          )}
+        </ul>
+      )}
+      <button
+        type="button"
+        disabled={syncing}
+        onClick={syncNow}
+        className="mt-3 min-h-9 rounded-full border border-amber-300 bg-white px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-eoe-espresso hover:bg-amber-100/80 disabled:opacity-60"
+      >
+        {syncing ? "Syncing…" : "Retry sync"}
+      </button>
     </div>
   );
 }

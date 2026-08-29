@@ -10,8 +10,13 @@ import { Contact } from "@/components/sections/Contact";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { CustomCursor } from "@/components/ui/CustomCursor";
 import { CocktailSpecial } from "@/components/ui/CocktailSpecial";
+import { getPublicSiteContent } from "@/lib/content/get-public-content";
+import { carTypesFromContent } from "@/lib/content/car-wash-prices";
 
-export default function Home() {
+export default async function Home() {
+  const content = await getPublicSiteContent();
+  const carTypeCatalog = carTypesFromContent(content);
+
   return (
     <div className="overflow-x-clip bg-eoe-ivory text-eoe-ink">
       <a
@@ -21,18 +26,18 @@ export default function Home() {
         Skip to content
       </a>
       <CustomCursor />
-      <SiteHeader />
+      <SiteHeader content={content.nav} />
       <main id="main-content" className="relative overflow-x-clip">
-        <Hero />
-        <Estate />
-        <Spaces />
-        <Experiences />
-        <Food />
-        <Booking />
-        <Gallery />
-        <Testimonials />
+        <Hero content={content.hero} />
+        <Estate content={content.estate} />
+        <Spaces content={content.spaces} />
+        <Experiences content={content.experiences} />
+        <Food content={content.food} />
+        <Booking carTypeCatalog={carTypeCatalog} site={content.site} />
+        <Gallery content={content.gallery} />
+        <Testimonials content={content.testimonials} />
       </main>
-      <Contact />
+      <Contact content={content.contact} site={content.site} />
       <CocktailSpecial />
     </div>
   );

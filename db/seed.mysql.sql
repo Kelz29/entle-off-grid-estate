@@ -50,3 +50,7 @@ ON DUPLICATE KEY UPDATE
 UPDATE services
    SET is_active = 0, is_available_online = 0, updated_at = NOW(3)
  WHERE business_id = 1 AND slug = 'estate-tour';
+
+-- Empty overlay = 100% code defaults. Safe to re-run.
+INSERT IGNORE INTO site_content (business_id, payload) VALUES (1, '{}');
+

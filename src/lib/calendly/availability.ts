@@ -21,11 +21,17 @@ export type SlotUsage = {
   overridden: boolean; // true if a manual hold is set on this slot
 };
 
+export type BookedInterval = {
+  start: number;
+  end: number;
+  guests: number;
+};
+
 type Window = { earliest: Date; latest: Date; durMs: number; candidates: Date[] };
 
 // Shared slot-start generation (CALENDLY_API.md §3): business hours, advance
 // bounds, step = duration+buffer, plus the closing "last seating".
-function generateWindow(
+export function generateWindow(
   business: BusinessRow,
   service: ServiceRow,
   windowStart: Date,
@@ -123,6 +129,49 @@ export async function getSlotUsage(opts: {
   const intervals = await bookedIntervals(service.id, win.earliest, win.latest);
   const holds = await getSlotHolds(service.id, win.earliest, win.latest);
 
+  const out: SlotUsage[] = [];
+  for (const slot of win.candidates) {
+    const s = slot.getTime();
+    const e = s + win.durMs;
+    const overlapping = intervals.filter((iv) => s < iv.end && e > iv.start);
+    const iso = slot.toISOString();
+    const capacity = service.exclusive ? 1 : service.capacity;
+    const held = service.exclusive ? 0 : holds.get(iso) ?? 0;
+    const actual = service.exclusive
+      ? overlapping.length > 0
+        ? 1
+        : 0
+      : overlapping.reduce((sum, iv) => sum + iv.guests, 0);
+    const booked = actual + held;
+    out.push({
+      start: slot,
+      capacity,
+      booked,
+      held,
+      remaining: capacity - booked,
+      overridden: held > 0,
+    });
+  }
+  return out;
+}
+
+/** Slot usage without DB — for degraded / snapshot availability. */
+export function computeSlotUsageFromIntervals(opts: {
+  business: BusinessRow;
+  service: ServiceRow;
+  windowStart: Date;
+  windowEnd: Date;
+  now?: Date;
+  intervals: BookedInterval[];
+  holds?: Map<string, number>;
+}): SlotUsage[] {
+  const { business, service, windowStart, windowEnd } = opts;
+  const now = opts.now ?? new Date();
+  const holds = opts.holds ?? new Map<string, number>();
+  const win = generateWindow(business, service, windowStart, windowEnd, now);
+  if (win.candidates.length === 0) return [];
+
+  const intervals = opts.intervals;
   const out: SlotUsage[] = [];
   for (const slot of win.candidates) {
     const s = slot.getTime();

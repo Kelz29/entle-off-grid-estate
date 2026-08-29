@@ -37,6 +37,10 @@ const nextConfig: NextConfig = {
         hostname: "grainy-gradients.vercel.app",
       },
     ],
+    localPatterns: [
+      { pathname: "/api/media/**" },
+      { pathname: "/**" },
+    ],
   },
   async headers() {
     return [

@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import Image from "next/image";
-import { hero } from "@/lib/media";
 import { AnalyticsEvents, trackEvent } from "@/lib/analytics";
+import { ContentImage } from "@/components/ui/ContentImage";
+import { ContentVideo } from "@/components/ui/ContentVideo";
+import type { HeroContent, ResolvedMedia } from "@/lib/content/types";
 
-export function Hero() {
+export function Hero({ content }: { content: HeroContent<ResolvedMedia> }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
 
@@ -33,20 +34,22 @@ export function Hero() {
       className="relative flex min-h-screen flex-col justify-end overflow-hidden bg-eoe-ink text-eoe-ink"
     >
       <div className="pointer-events-none absolute inset-0">
-        <Image
-          src={hero.poster}
-          alt=""
+        <ContentImage
+          src={content.poster.src}
+          fallbackSrc={content.poster.fallbackSrc}
+          alt={`${content.subtitle} — off-grid estate in Bloemfontein`}
           fill
           priority
           sizes="100vw"
           className="object-cover"
         />
         {!reducedMotion && (
-          <video
+          <ContentVideo
             ref={videoRef}
             className="absolute inset-0 h-full w-full object-cover"
-            src={hero.video}
-            poster={hero.poster}
+            src={content.video.src}
+            fallbackSrc={content.video.fallbackSrc}
+            poster={content.poster.src}
             autoPlay
             muted
             loop
@@ -72,7 +75,7 @@ export function Hero() {
           transition={{ duration: 0.9, ease: "easeOut" }}
           className="mb-4 text-xs tracking-[0.28em] text-eoe-ivory/85 sm:tracking-[0.35em]"
         >
-          OFF GRID ESTATE • SOUTH AFRICA
+          {content.eyebrow}
         </motion.p>
 
         <motion.h1
@@ -81,7 +84,12 @@ export function Hero() {
           transition={{ duration: 1, ease: "easeOut", delay: 0.05 }}
           className="max-w-full font-display text-[clamp(2.4rem,11vw,6.5rem)] leading-[0.9] tracking-[0.1em] text-eoe-ivory sm:tracking-[0.12em] md:text-[6.5vw]"
         >
-          An escape <br />that feels <br />like home
+          {content.titleLines.map((line, i) => (
+            <span key={`${line}-${i}`}>
+              {i > 0 && <br />}
+              {line}
+            </span>
+          ))}
         </motion.h1>
 
         <motion.p
@@ -90,7 +98,7 @@ export function Hero() {
           transition={{ duration: 1, ease: "easeOut", delay: 0.15 }}
           className="mt-5 max-w-xl font-display text-xl tracking-[0.08em] text-eoe-ivory/90 sm:text-2xl md:text-3xl"
         >
-          Entle Off Grid Estate
+          {content.subtitle}
         </motion.p>
 
         <motion.div
@@ -100,8 +108,7 @@ export function Hero() {
           className="mt-4 max-w-xl text-sm text-eoe-ivory/85 md:text-base"
         >
           <p>
-            A private estate, off-grid café, and considered venue for gatherings
-            that feel both intimate and quietly cinematic.
+            {content.body}
           </p>
         </motion.div>
 
@@ -112,22 +119,22 @@ export function Hero() {
           className="mt-8 flex max-w-full flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4"
         >
           <a
-            href="#booking"
+            href={content.primaryCta.href}
             onClick={() =>
               trackEvent(AnalyticsEvents.CtaBook, { source: "hero" })
             }
             className="inline-flex items-center justify-center rounded-full border border-eoe-gold bg-eoe-gold px-5 py-3 text-center text-[11px] font-semibold tracking-[0.18em] text-eoe-ivory hover:bg-eoe-gold/90 sm:px-6 sm:text-xs sm:tracking-[0.22em]"
           >
-            BOOK A DATE
+            {content.primaryCta.label}
           </a>
           <a
-            href="#estate"
+            href={content.secondaryCta.href}
             onClick={() =>
               trackEvent(AnalyticsEvents.CtaExplore, { source: "hero" })
             }
             className="inline-flex items-center justify-center rounded-full border border-eoe-ivory/40 px-5 py-3 text-center text-[11px] font-semibold tracking-[0.18em] text-eoe-ivory/90 hover:bg-eoe-ivory/5 sm:px-6 sm:text-xs sm:tracking-[0.22em]"
           >
-            EXPLORE THE ESTATE
+            {content.secondaryCta.label}
           </a>
         </motion.div>
       </div>

@@ -32,13 +32,30 @@ import {
 } from "@/lib/analytics-server";
 import { checkoutReturnOrigin } from "@/lib/checkout-return-origin";
 import { isBookingCheckoutDisabled } from "@/lib/booking-config";
+import { getPublicSiteContent } from "@/lib/content/get-public-content";
+import { carTypesFromContent } from "@/lib/content/car-wash-prices";
+import {
+  snapshotBusiness,
+  snapshotService,
+} from "@/lib/calendly/booking-snapshot";
+import {
+  buildDeferredPayload,
+  encodeDeferredMetadata,
+} from "@/lib/calendly/deferred-booking";
+import {
+  isDbConnectivityError,
+  logBookingApiError,
+  publicBookingError,
+} from "@/lib/api-errors";
+import type { BusinessRow, ServiceRow } from "@/lib/calendly/types";
 
 /**
  * Start a paid booking (Yoco hosted Checkout). Sequence:
  *   1. reserve the slot as a `pending` booking (409 if taken — before checkout)
  *   2. create a Yoco checkout with our success/cancel/failure URLs + bookingId
  *   3. return { redirectUrl } for the browser to hand off to Yoco
- * Payment is confirmed later by the webhook (POST /api/payments/yoco/webhook).
+ * If MySQL is unreachable after validation, falls back to deferred checkout
+ * (full payload in Yoco metadata, materialized on webhook/reconcile).
  */
 export async function POST(request: Request) {
   if (isBookingCheckoutDisabled()) {
@@ -87,14 +104,12 @@ export async function POST(request: Request) {
     throw err;
   }
 
-  const service = await getService(serviceId);
-  if (!service) {
+  const resolved = await resolveServiceAndBusiness(serviceId);
+  if (!resolved) {
     return NextResponse.json({ detail: "Event type not found" }, { status: 404 });
   }
-  const business = await getActiveBusiness(service.business_id);
-  if (!business) {
-    return NextResponse.json({ detail: "Business not found" }, { status: 404 });
-  }
+  const { service, business } = resolved;
+
   if (service.price_cents <= 0) {
     return NextResponse.json(
       { detail: "This experience has no deposit configured" },
@@ -102,7 +117,6 @@ export async function POST(request: Request) {
     );
   }
 
-  // Deposit = (price × guests) + car wash mins (if any) + R30 platform fee.
   const guests = parsed.guests ?? 1;
   let carTypes: string[] | null = null;
   try {
@@ -120,15 +134,18 @@ export async function POST(request: Request) {
     );
   }
 
+  const catalog = carTypesFromContent(await getPublicSiteContent());
   const amountInCents = bookingDepositCents({
     priceCents: service.price_cents,
     guests,
     serviceSlug: service.slug,
     carTypes,
+    carTypeCatalog: catalog,
   });
 
-  // 1. Reserve the slot as a pending booking (409 before we create a checkout).
   let bookingId: string;
+  let deferred = false;
+
   try {
     const booking = await createScheduledEvent({
       business,
@@ -146,21 +163,41 @@ export async function POST(request: Request) {
     if (err instanceof SlotUnavailableError) {
       return NextResponse.json({ detail: err.message }, { status: 409 });
     }
-    if (err instanceof ServiceNotBookableError || err instanceof InvalidCarsError) {
+    if (
+      err instanceof ServiceNotBookableError ||
+      err instanceof InvalidCarsError
+    ) {
       return NextResponse.json({ detail: err.message }, { status: 400 });
     }
-    throw err;
+    if (isDbConnectivityError(err)) {
+      const payload = buildDeferredPayload({
+        businessId: business.id,
+        serviceId: service.id,
+        startTime: parsed.startTime,
+        guests,
+        invitee: parsed.invitee,
+        carTypes,
+        notes: parsed.notes,
+        specialRequest: parsed.specialRequest,
+        amountCents: amountInCents,
+      });
+      bookingId = payload.bookingId;
+      deferred = true;
+    } else {
+      logBookingApiError("checkout", err);
+      return NextResponse.json(
+        { detail: publicBookingError(err) },
+        { status: 503 }
+      );
+    }
   }
 
-  // 2. Create the hosted checkout. Cancel/fail URLs carry an HMAC release token.
-  // Path-based return URLs. Origin comes from the browser (same-origin),
-  // not a hardcoded APP_BASE_URL — that was sending production payers to localhost.
   const baseUrl = checkoutReturnOrigin(request);
   let releaseToken: string;
   try {
     releaseToken = await createReleaseToken(bookingId);
   } catch (err) {
-    await releaseUnpaidBooking(bookingId).catch(() => {});
+    if (!deferred) await releaseUnpaidBooking(bookingId).catch(() => {});
     return NextResponse.json(
       {
         detail:
@@ -174,36 +211,62 @@ export async function POST(request: Request) {
   const successUrl = `${baseUrl}/booking/success/${encodeURIComponent(bookingId)}`;
   const cancelUrl = `${baseUrl}/booking/cancelled/${encodeURIComponent(bookingId)}?${tokenQs}`;
   const failureUrl = `${baseUrl}/booking/failed/${encodeURIComponent(bookingId)}?${tokenQs}`;
+
+  const deferredPayload = deferred
+    ? buildDeferredPayload({
+        businessId: business.id,
+        serviceId: service.id,
+        startTime: parsed.startTime,
+        guests,
+        invitee: parsed.invitee,
+        carTypes,
+        notes: parsed.notes,
+        specialRequest: parsed.specialRequest,
+        amountCents: amountInCents,
+        bookingId,
+      })
+    : null;
+
   try {
     const checkout = await createCheckout({
       amountInCents,
       successUrl,
       cancelUrl,
       failureUrl,
-      metadata: {
-        bookingId,
-        businessId: String(business.id),
-        serviceId: String(service.id),
-        customerEmail: parsed.invitee.email,
-      },
+      metadata: deferred
+        ? encodeDeferredMetadata(deferredPayload!)
+        : {
+            bookingId,
+            businessId: String(business.id),
+            serviceId: String(service.id),
+            customerEmail: parsed.invitee.email,
+          },
     });
-    await setCheckoutId(bookingId, checkout.id);
+
+    if (!deferred) {
+      await setCheckoutId(bookingId, checkout.id);
+    } else {
+      await setCheckoutId(bookingId, checkout.id).catch(() => {});
+    }
+
     await trackServerEvent(ServerAnalyticsEvents.CheckoutCreated, {
       service_id: service.id,
       amount_cents: amountInCents,
       guests,
+      deferred,
     });
+
     return NextResponse.json(
       {
         redirectUrl: checkout.redirectUrl,
         bookingId,
         releaseToken,
+        deferred,
       },
       { status: 201 }
     );
   } catch (err) {
-    // Could not start payment → release the reserved slot.
-    await releaseUnpaidBooking(bookingId).catch(() => {});
+    if (!deferred) await releaseUnpaidBooking(bookingId).catch(() => {});
     const message =
       err instanceof YocoError ? err.message : "Could not start payment";
     const yocoStatus = err instanceof YocoError ? err.status : undefined;
@@ -213,6 +276,7 @@ export async function POST(request: Request) {
       baseUrl,
       amountInCents,
       successUrl,
+      deferred,
     });
     await trackServerEvent(ServerAnalyticsEvents.CheckoutYocoFailed, {
       service_id: service.id,
@@ -222,6 +286,25 @@ export async function POST(request: Request) {
       { detail: message, ...(yocoStatus ? { yocoStatus } : {}) },
       { status: 502 }
     );
+  }
+}
+
+async function resolveServiceAndBusiness(
+  serviceId: number
+): Promise<{ service: ServiceRow; business: BusinessRow } | null> {
+  try {
+    const service = await getService(serviceId);
+    if (!service) return null;
+    const business = await getActiveBusiness(service.business_id);
+    if (!business) return null;
+    return { service, business };
+  } catch (err) {
+    if (!isDbConnectivityError(err)) throw err;
+    const service = snapshotService(serviceId);
+    if (!service) return null;
+    const business = snapshotBusiness(service.business_id);
+    if (!business) return null;
+    return { service, business };
   }
 }
 

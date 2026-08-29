@@ -24,10 +24,59 @@ export async function setServiceCapacity(
   serviceId: number,
   capacity: number
 ): Promise<ServiceRow | null> {
+  return updateService(serviceId, { capacity });
+}
+
+export type ServicePatch = {
+  capacity?: number;
+  name?: string;
+  description?: string;
+  duration_minutes?: number;
+  price_cents?: number;
+  is_active?: boolean;
+};
+
+export async function updateService(
+  serviceId: number,
+  patch: ServicePatch
+): Promise<ServiceRow | null> {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+
+  if (patch.capacity !== undefined) {
+    params.push(patch.capacity);
+    sets.push(`capacity = $${params.length}`);
+  }
+  if (patch.name !== undefined) {
+    params.push(patch.name);
+    sets.push(`name = $${params.length}`);
+  }
+  if (patch.description !== undefined) {
+    params.push(patch.description);
+    sets.push(`description = $${params.length}`);
+  }
+  if (patch.duration_minutes !== undefined) {
+    params.push(patch.duration_minutes);
+    sets.push(`duration_minutes = $${params.length}`);
+  }
+  if (patch.price_cents !== undefined) {
+    params.push(patch.price_cents);
+    sets.push(`price_cents = $${params.length}`);
+  }
+  if (patch.is_active !== undefined) {
+    params.push(patch.is_active ? 1 : 0);
+    sets.push(`is_active = $${params.length}`);
+    params.push(patch.is_active ? 1 : 0);
+    sets.push(`is_available_online = $${params.length}`);
+  }
+
+  if (sets.length === 0) return getService(serviceId);
+
+  params.push(serviceId);
   const { rowCount } = await query(
-    `UPDATE services SET capacity = $2, updated_at = NOW(3)
-      WHERE id = $1`,
-    [serviceId, capacity]
+    `UPDATE services SET ${sets.join(", ")}, updated_at = NOW(3)
+      WHERE id = $${params.length}`,
+    params
   );
   return rowCount > 0 ? getService(serviceId) : null;
 }

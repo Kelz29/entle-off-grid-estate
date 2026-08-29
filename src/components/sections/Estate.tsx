@@ -1,10 +1,10 @@
 "use client";
 
 import { motion } from "framer-motion";
-import Image from "next/image";
-import { estatePhoto } from "@/lib/media";
+import { ContentImage } from "@/components/ui/ContentImage";
+import type { EstateContent, ResolvedMedia } from "@/lib/content/types";
 
-export function Estate() {
+export function Estate({ content }: { content: EstateContent<ResolvedMedia> }) {
   return (
     <section
       id="estate"
@@ -19,16 +19,17 @@ export function Estate() {
           transition={{ duration: 0.9, ease: "easeOut" }}
           className="group relative aspect-[3/4] w-full overflow-hidden rounded-3xl bg-eoe-espresso/10 md:w-[45%] md:shrink-0"
         >
-          <Image
-            src={estatePhoto.src}
-            alt={estatePhoto.alt}
+          <ContentImage
+            src={content.image.src}
+            fallbackSrc={content.image.fallbackSrc}
+            alt={content.alt}
             fill
             sizes="(min-width: 768px) 45vw, 100vw"
             className="object-cover transition-transform duration-[3500ms] group-hover:scale-105"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-eoe-ink/50 to-transparent" />
           <p className="absolute bottom-5 left-5 text-xs uppercase tracking-[0.24em] text-eoe-ivory/90">
-            {estatePhoto.caption}
+            {content.caption}
           </p>
         </motion.div>
 
@@ -40,29 +41,28 @@ export function Estate() {
           className="min-w-0 md:flex-1"
         >
           <p className="mb-4 text-xs tracking-[0.3em] text-eoe-espresso">
-            ABOUT THE ESTATE
+            {content.eyebrow}
           </p>
           <h2 className="font-display text-4xl tracking-[0.18em] text-eoe-espresso md:text-5xl">
-            Where stillness
-            <br />
-            meets celebration.
+            {content.titleLines.map((line, i) => (
+              <span key={`${line}-${i}`}>
+                {i > 0 && <br />}
+                {line}
+              </span>
+            ))}
           </h2>
-          <p className="mt-6 text-sm leading-relaxed text-eoe-ink/90 md:text-base">
-            Entle Off Grid Estate is a Black owned, privately held space for
-            slow mornings, golden hour gatherings, and evenings that taper into
-            stories around the table. Powered by the sun and surrounded by open
-            sky, the estate is intentionally intimate, designed for small
-            weddings, private dinners, creative retreats, and curated community
-            moments.
-          </p>
-          <p className="mt-4 text-sm leading-relaxed text-eoe-ink/90 md:text-base">
-            Every room, pathway, and tablescape is considered. From the
-            minimalist cafe to the lawn that folds into the horizon, EOE is less
-            a venue and more a feeling: quietly expensive, deeply warm, and
-            entirely off grid.
-          </p>
+          {content.paragraphs.map((p, i) => (
+            <p
+              key={i}
+              className={`text-sm leading-relaxed text-eoe-ink/90 md:text-base ${
+                i === 0 ? "mt-6" : "mt-4"
+              }`}
+            >
+              {p}
+            </p>
+          ))}
           <p className="mt-8 text-xs uppercase tracking-[0.24em] text-eoe-espresso">
-            Private estate • Off grid cafe • Curated events
+            {content.footer}
           </p>
         </motion.div>
       </div>

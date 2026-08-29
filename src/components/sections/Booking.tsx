@@ -8,6 +8,7 @@ import {
   carWashMinimumCents,
   isCarWashService,
   MAX_CARS_PER_SESSION,
+  type CarTypeCatalog,
   type CarTypeId,
 } from "@/lib/calendly/car-wash";
 import {
@@ -20,11 +21,19 @@ import {
   phoneError,
 } from "@/lib/contact-validation";
 import { AnalyticsEvents, trackEvent } from "@/lib/analytics";
+import type { SiteDetails, ResolvedMedia } from "@/lib/content/types";
 import {
   bookingPhoneOnly,
   BOOKING_PHONE,
   BOOKING_PHONE_HREF,
 } from "@/lib/booking-config";
+import {
+  loadEventTypesCache,
+  loadSlotsCache,
+  saveEventTypesCache,
+  saveSlotsCache,
+  slotsCacheKey,
+} from "@/lib/booking-client-cache";
 
 const BUSINESS_ID = process.env.NEXT_PUBLIC_BUSINESS_ID ?? "1";
 const DEFAULT_CAR_TYPE: CarTypeId = "sedan";
@@ -71,6 +80,20 @@ function isOpenDay(d: Date) {
   return [0, 5, 6].includes(d.getDay());
 }
 
+const FRIENDLY_LOAD_MSG =
+  "We're having trouble loading live availability — showing the last schedule we know.";
+
+function friendlyLoadError(message: string): string {
+  if (
+    /unreachable|not configured|booking system|MYSQL|ECONN|ETIMEDOUT/i.test(
+      message
+    )
+  ) {
+    return FRIENDLY_LOAD_MSG;
+  }
+  return message;
+}
+
 // Pull the wall-clock time straight from a zoned ISO string (already in the
 // venue's timezone) — "2026-07-04T08:00:00+02:00" → "08:00".
 function wallTime(iso: string) {
@@ -78,10 +101,24 @@ function wallTime(iso: string) {
   return m ? `${m[1]}:${m[2]}` : iso;
 }
 
-export function Booking() {
+export function Booking({
+  carTypeCatalog = CAR_TYPES,
+  site,
+}: {
+  carTypeCatalog?: CarTypeCatalog;
+  site?: SiteDetails<ResolvedMedia>;
+}) {
+  const diningHours =
+    site?.diningHours?.trim() || "Friday to Sunday, 11:00 to 18:00";
+  const privateFunctionsNote =
+    site?.privateFunctionsNote?.trim() ||
+    "Private functions available Monday to Thursday — call to book.";
+  const venuePhoneHref = site?.phoneHref || BOOKING_PHONE_HREF;
+  const venuePhone = site?.phone || BOOKING_PHONE;
   const [step, setStep] = useState<Step>("service");
   const [services, setServices] = useState<EventType[]>([]);
   const [servicesError, setServicesError] = useState<string | null>(null);
+  const [degradedMode, setDegradedMode] = useState(false);
   const [service, setService] = useState<EventType | null>(null);
 
   const [date, setDate] = useState<Date | null>(null);
@@ -125,13 +162,16 @@ export function Booking() {
 
   const guestCount = Math.max(1, Math.trunc(Number(guests)) || 1);
   const needsCars = isCarWashService(service?.slug);
-  const washMinimum = needsCars ? carWashMinimumCents(carTypes) : 0;
+  const washMinimum = needsCars
+    ? carWashMinimumCents(carTypes, carTypeCatalog)
+    : 0;
   const depositTotal = service
     ? bookingDepositCents({
         priceCents: service.price_cents,
         guests: guestCount,
         serviceSlug: service.slug,
         carTypes: needsCars ? carTypes : null,
+        carTypeCatalog,
       })
     : 0;
 
@@ -142,23 +182,41 @@ export function Booking() {
       .then(async (r) => {
         const data = await r.json().catch(() => ({}));
         if (!r.ok) {
+          const cached = loadEventTypesCache();
+          if (cached?.length) {
+            if (!alive) return { collection: cached, degraded: true };
+            setServices(cached as EventType[]);
+            setServicesError(null);
+            setDegradedMode(true);
+            return null;
+          }
           throw new Error(
             typeof data.detail === "string"
-              ? data.detail
-              : "Unable to load bookable spaces."
+              ? friendlyLoadError(data.detail)
+              : FRIENDLY_LOAD_MSG
           );
         }
         return data;
       })
       .then((data) => {
-        if (!alive) return;
-        setServices(data.collection ?? []);
+        if (!alive || data == null) return;
+        const list = (data.collection ?? []) as EventType[];
+        setServices(list);
         setServicesError(null);
+        setDegradedMode(Boolean(data.degraded));
+        saveEventTypesCache(list);
       })
       .catch((err) => {
         if (!alive) return;
+        const cached = loadEventTypesCache();
+        if (cached?.length) {
+          setServices(cached as EventType[]);
+          setServicesError(null);
+          setDegradedMode(true);
+          return;
+        }
         setServicesError(
-          err instanceof Error ? err.message : "Unable to load bookable spaces."
+          err instanceof Error ? friendlyLoadError(err.message) : FRIENDLY_LOAD_MSG
         );
       });
     return () => {
@@ -177,16 +235,47 @@ export function Booking() {
         start.setHours(0, 0, 0, 0);
         const end = new Date(start);
         end.setDate(end.getDate() + 1);
+        const startIso = start.toISOString();
+        const endIso = end.toISOString();
+        const cacheKey = slotsCacheKey(svc.uri, startIso, endIso);
         const url =
           `/api/v1/calendly/event_type_available_times` +
           `?event_type=${encodeURIComponent(svc.uri)}` +
-          `&start_time=${encodeURIComponent(start.toISOString())}` +
-          `&end_time=${encodeURIComponent(end.toISOString())}`;
+          `&start_time=${encodeURIComponent(startIso)}` +
+          `&end_time=${encodeURIComponent(endIso)}`;
         const res = await fetch(url);
-        const data = await res.json();
-        setSlots(res.ok ? data.collection ?? [] : []);
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          const list = (data.collection ?? []) as AvailableTime[];
+          setSlots(list);
+          setDegradedMode(Boolean(data.degraded));
+          saveSlotsCache(cacheKey, list, data.degraded);
+        } else {
+          const cached = loadSlotsCache(cacheKey);
+          if (cached?.collection?.length) {
+            setSlots(cached.collection as AvailableTime[]);
+            setDegradedMode(true);
+          } else {
+            setSlots([]);
+          }
+        }
       } catch {
-        setSlots([]);
+        const start = new Date(day);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(start);
+        end.setDate(end.getDate() + 1);
+        const cacheKey = slotsCacheKey(
+          svc.uri,
+          start.toISOString(),
+          end.toISOString()
+        );
+        const cached = loadSlotsCache(cacheKey);
+        if (cached?.collection?.length) {
+          setSlots(cached.collection as AvailableTime[]);
+          setDegradedMode(true);
+        } else {
+          setSlots([]);
+        }
       } finally {
         setSlotsLoading(false);
       }
@@ -355,18 +444,18 @@ export function Booking() {
                 <span className="font-medium text-eoe-espresso">
                   call us to confirm
                 </span>
-                . Online card payment is under maintenance. Bookings run{" "}
+                . Online card payment is under maintenance. Café bookings run{" "}
                 <span className="font-medium text-eoe-espresso">
-                  Friday to Sunday, 11:00 to 18:00
+                  {diningHours}
                 </span>
                 .
               </>
             ) : (
               <>
                 Choose an experience, select an available slot, and we&apos;ll hold
-                it for you. Bookings run{" "}
+                it for you. Café bookings run{" "}
                 <span className="font-medium text-eoe-espresso">
-                  Friday to Sunday, 11:00 to 18:00
+                  {diningHours}
                 </span>
                 . A R100 per guest deposit secures your slot and comes off your
                 bill on the day, plus a R30 platform fee. Cafe with car wash adds
@@ -374,17 +463,34 @@ export function Booking() {
               </>
             )}
           </p>
+          <p className="mt-3 max-w-md text-sm leading-relaxed text-eoe-ink/90">
+            {privateFunctionsNote}{" "}
+            <a
+              href={venuePhoneHref}
+              onClick={() => trackEvent(AnalyticsEvents.ContactPhone)}
+              className="font-medium text-eoe-espresso underline underline-offset-2"
+            >
+              {venuePhone}
+            </a>
+            .
+          </p>
           {phoneOnly && (
             <p className="mt-3 max-w-md rounded-2xl border border-eoe-espresso/15 bg-eoe-espresso/5 px-4 py-3 text-sm text-eoe-espresso">
               Call{" "}
               <a
-                href={BOOKING_PHONE_HREF}
+                href={venuePhoneHref}
                 onClick={() => trackEvent(AnalyticsEvents.ContactPhone)}
                 className="font-semibold underline underline-offset-2"
               >
-                {BOOKING_PHONE}
+                {venuePhone}
               </a>{" "}
               to book — have your chosen date, time, and guest count ready.
+            </p>
+          )}
+          {degradedMode && !phoneOnly && (
+            <p className="mt-3 max-w-md rounded-2xl border border-amber-200/80 bg-amber-50 px-4 py-3 text-sm text-eoe-ink/90">
+              Availability may not be live. We&apos;ll confirm your slot after
+              payment.
             </p>
           )}
         </div>
@@ -623,7 +729,7 @@ export function Booking() {
                               className={inputCls}
                               required
                             >
-                              {CAR_TYPES.map((t) => (
+                              {carTypeCatalog.map((t) => (
                                 <option key={t.id} value={t.id}>
                                   {t.label} (from {money(t.min_cents)})
                                 </option>
@@ -661,11 +767,11 @@ export function Booking() {
                       <>
                         Pick your slot above, then call{" "}
                         <a
-                          href={BOOKING_PHONE_HREF}
+                          href={venuePhoneHref}
                           onClick={() => trackEvent(AnalyticsEvents.ContactPhone)}
                           className="font-medium text-eoe-espresso underline underline-offset-2"
                         >
-                          {BOOKING_PHONE}
+                          {venuePhone}
                         </a>{" "}
                         with your name, party size, and any special requests.
                       </>
@@ -825,7 +931,7 @@ export function Booking() {
               </ul>
               <div className="mt-6 flex flex-col gap-2">
                 <a
-                  href={BOOKING_PHONE_HREF}
+                  href={venuePhoneHref}
                   onClick={() => {
                     trackEvent(AnalyticsEvents.ContactPhone, {
                       source: "booking_phone_only",
@@ -834,7 +940,7 @@ export function Booking() {
                   }}
                   className="rounded-full bg-eoe-espresso px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-ivory hover:bg-eoe-espresso/90"
                 >
-                  Call {BOOKING_PHONE}
+                  Call {venuePhone}
                 </a>
                 <button
                   type="button"

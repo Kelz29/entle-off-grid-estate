@@ -5,19 +5,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AnalyticsEvents, trackEvent } from "@/lib/analytics";
-
-type NavItem = { href: string; label: string };
-
-/** Primary nav: no Car Wash (linked from The Table, footer, mobile Browse). */
-const NAV_ITEMS: NavItem[] = [
-  { href: "#estate", label: "The Estate" },
-  { href: "#spaces", label: "Spaces" },
-  { href: "#experiences", label: "Experiences" },
-  { href: "/menu", label: "Menu" },
-  { href: "#booking", label: "Book" },
-  { href: "#gallery", label: "Gallery" },
-  { href: "#contact", label: "Contact" },
-];
+import type { NavContent } from "@/lib/content/types";
+import { DEFAULT_SITE_CONTENT } from "@/lib/content/defaults";
 
 function resolveHref(href: string, isHome: boolean): string {
   if (href.startsWith("/") && !href.startsWith("/#")) return href;
@@ -25,7 +14,8 @@ function resolveHref(href: string, isHome: boolean): string {
   return href;
 }
 
-export function SiteHeader() {
+export function SiteHeader({ content }: { content?: NavContent }) {
+  const nav = content ?? DEFAULT_SITE_CONTENT.nav;
   const pathname = usePathname();
   const isHome = pathname === "/";
   const [scrolled, setScrolled] = useState(false);
@@ -83,14 +73,14 @@ export function SiteHeader() {
           href="/"
           className="min-w-0 flex-1 overflow-hidden font-display text-sm font-semibold normal-case tracking-[0.08em] sm:text-base lg:flex-none lg:shrink-0 lg:overflow-visible"
         >
-          <span className="block truncate lg:inline">Entle Off Grid Estate</span>
+          <span className="block truncate lg:inline">{nav.brandName}</span>
         </Link>
 
         <nav
           className="ml-auto hidden shrink-0 items-center gap-3 lg:flex xl:gap-5"
           aria-label="Primary"
         >
-          {NAV_ITEMS.map((item) => {
+          {nav.items.map((item) => {
             const href = resolveHref(item.href, isHome);
             const active = item.href === "/menu" && pathname === "/menu";
             return (
@@ -117,7 +107,7 @@ export function SiteHeader() {
             }
             className="hidden rounded-full border border-eoe-gold/70 bg-eoe-gold/10 px-4 py-2 text-[11px] font-medium text-eoe-espresso hover:bg-eoe-gold/20 lg:inline-flex"
           >
-            Book a Date
+            {nav.bookCta}
           </Link>
           <button
             type="button"
@@ -141,7 +131,7 @@ export function SiteHeader() {
               aria-label="Sections"
               className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-50 flex flex-col gap-1 rounded-3xl border border-eoe-espresso/10 bg-eoe-ivory/95 p-4 shadow-lg backdrop-blur-md lg:hidden"
             >
-              {NAV_ITEMS.map((item) => (
+              {nav.items.map((item) => (
                 <Link
                   key={item.href}
                   href={resolveHref(item.href, isHome)}

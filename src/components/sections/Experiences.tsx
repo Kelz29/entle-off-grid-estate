@@ -2,12 +2,16 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { reels } from "@/lib/media";
 import { HoverVideo } from "@/components/ui/HoverVideo";
 import { Lightbox, type MediaItem } from "@/components/ui/Lightbox";
 import { MobileScrollStrip, mobileScrollSlide } from "@/components/ui/MobileScrollStrip";
+import type { ExperiencesContent, ResolvedMedia } from "@/lib/content/types";
 
-export function Experiences() {
+export function Experiences({
+  content,
+}: {
+  content: ExperiencesContent<ResolvedMedia>;
+}) {
   const [active, setActive] = useState<MediaItem | null>(null);
 
   return (
@@ -19,42 +23,50 @@ export function Experiences() {
         <div className="mb-10 flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-xs tracking-[0.3em] text-eoe-ivory/90">
-              EXPERIENCES
+              {content.eyebrow}
             </p>
             <h2 className="mt-3 font-display text-3xl tracking-[0.18em] md:text-4xl">
-              Gatherings that linger
-              <br />
-              long after they end.
+              {content.titleLines.map((line, i) => (
+                <span key={`${line}-${i}`}>
+                  {i > 0 && <br />}
+                  {line}
+                </span>
+              ))}
             </h2>
           </div>
           <p className="max-w-sm text-sm leading-relaxed text-eoe-ivory/95">
-            From brunch series and chef&apos;s tables to pop ups and creative
-            residencies, the estate is a canvas for experiences that feel
-            deeply personal.
+            {content.intro}
           </p>
         </div>
       </div>
 
-      {/* Reels — horizontal scroll of portrait videos */}
       <div className="mx-auto max-w-[1400px]">
         <MobileScrollStrip
           outerClassName="md:mx-0 md:overflow-visible md:pl-0 md:px-1"
           trackClassName="md:gap-5 md:pr-1"
         >
-          {reels.map((reel, index) => (
+          {content.items.map((reel, index) => (
             <motion.button
-              key={reel.src}
+              key={`${reel.video.src}-${index}`}
               type="button"
               initial={{ opacity: 0, y: 30 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, amount: 0.2 }}
               transition={{ duration: 0.6, ease: "easeOut", delay: index * 0.05 }}
-              onClick={() => setActive({ type: "video", src: reel.src, caption: reel.title })}
+              onClick={() =>
+                setActive({
+                  type: "video",
+                  src: reel.video.src,
+                  caption: reel.title,
+                })
+              }
               className={`group relative text-left ${mobileScrollSlide} sm:w-[250px] md:w-[280px] md:shrink-0`}
             >
               <HoverVideo
-                src={reel.src}
-                poster={reel.poster}
+                src={reel.video.src}
+                poster={reel.poster.src}
+                fallbackSrc={reel.video.fallbackSrc}
+                posterFallback={reel.poster.fallbackSrc}
                 alt={reel.title}
                 className="aspect-[9/16] rounded-3xl border border-eoe-ivory/10"
               >

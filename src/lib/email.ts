@@ -2,6 +2,7 @@ import nodemailer, { type Transporter } from "nodemailer";
 import type { BookingRow, BusinessRow } from "./calendly/types";
 import { carTypeLabel } from "./calendly/car-wash";
 import { enqueueEmailDetached } from "./email-queue";
+import { DEFAULT_SITE_CONTENT } from "./content/defaults";
 
 // SMTP transporter from env (SMTP_HOST/PORT/USER/PASSWORD/FROM_EMAIL).
 // Cached on globalThis so dev hot-reloads don't open a new pool each time.
@@ -57,6 +58,7 @@ function whenLabel(value: string | Date, tz: string): string {
 
 const CLAY = "#9a6552";
 const PHONE = "067 366 2302";
+const VENUE_HOURS_FOOTER = `182 Lakeview Bloemfontein · ${PHONE} · ${DEFAULT_SITE_CONTENT.site.diningHours}; ${DEFAULT_SITE_CONTENT.site.privateFunctionsNote}`;
 // Shared call-to-action for every notification.
 const CALL_CTA = `Anything you'd like to ask, reschedule, or cancel? Give us a call on <strong style="color:#2a1a12;">${PHONE}</strong> and we'll happily sort it out.`;
 
@@ -103,7 +105,7 @@ function renderEmail(opts: {
             }
           </td></tr>
           <tr><td style="padding:18px 32px;border-top:1px solid #f0eae4;color:#9a8a82;font-size:12px;">
-            182 Lakeview Bloemfontein · 067 366 2302 · Fri to Sun, 11:00 to 18:00
+            ${VENUE_HOURS_FOOTER}
           </td></tr>
         </table>
       </td></tr>
@@ -261,7 +263,7 @@ function prepareMarketingMail(input: {
             <p style="margin:18px 0 0;color:#6a5a52;font-size:13px;line-height:1.6;">${CALL_CTA}</p>
           </td></tr>
           <tr><td style="padding:18px 32px;border-top:1px solid #f0eae4;color:#9a8a82;font-size:12px;">
-            182 Lakeview Bloemfontein · 067 366 2302 · Fri to Sun, 11:00 to 18:00
+            ${VENUE_HOURS_FOOTER}
           </td></tr>
         </table>
       </td></tr>
@@ -318,4 +320,58 @@ export async function sendMarketingEmail(input: {
   body: string;
 }): Promise<boolean> {
   return queueMarketingEmail(input);
+}
+
+/** Emergency alert when a paid deferred booking cannot be stored (DB down). */
+export async function sendDeferredBookingAlert(
+  payload: {
+    bookingId: string;
+    guestName: string;
+    guestEmail: string;
+    startTime: string;
+    guests: number;
+    amountCents: number;
+  },
+  checkoutId: string,
+  err: unknown
+): Promise<void> {
+  const transport = getTransport();
+  const to =
+    process.env.DEFERRED_ALERT_EMAIL?.trim() ||
+    process.env.SMTP_FROM_EMAIL?.trim() ||
+    process.env.SMTP_USER?.trim();
+  if (!transport || !to) {
+    console.error("[email] deferred alert skipped — no SMTP/to", err);
+    return;
+  }
+
+  const detail =
+    err instanceof Error ? err.message : String(err ?? "unknown error");
+  const subject = `URGENT: paid booking needs manual sync (${payload.bookingId})`;
+  const text = [
+    "A guest paid via Yoco but the booking could not be saved automatically.",
+    "",
+    `Booking id: ${payload.bookingId}`,
+    `Checkout: ${checkoutId}`,
+    `Guest: ${payload.guestName} <${payload.guestEmail}>`,
+    `When: ${payload.startTime}`,
+    `Guests: ${payload.guests}`,
+    `Amount cents: ${payload.amountCents}`,
+    "",
+    `Error: ${detail}`,
+  ].join("\n");
+
+  enqueueEmailDetached(async () => {
+    try {
+      await transport.sendMail({
+        from: fromAddress(),
+        to,
+        subject,
+        text,
+        html: `<pre style="font-family:monospace;font-size:13px;">${escapeHtml(text)}</pre>`,
+      });
+    } catch (mailErr) {
+      console.error("[email] deferred alert failed:", mailErr);
+    }
+  });
 }

@@ -2,8 +2,10 @@ import Link from "next/link";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { Contact } from "@/components/sections/Contact";
 import { CustomCursor } from "@/components/ui/CustomCursor";
+import { getPublicSiteContent } from "@/lib/content/get-public-content";
 
-export function SiteChrome({ children }: { children: React.ReactNode }) {
+export async function SiteChrome({ children }: { children: React.ReactNode }) {
+  const content = await getPublicSiteContent();
   return (
     <div className="overflow-x-clip bg-eoe-ivory text-eoe-ink">
       <a
@@ -13,11 +15,11 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
         Skip to content
       </a>
       <CustomCursor />
-      <SiteHeader />
+      <SiteHeader content={content.nav} />
       <main id="main-content" className="relative overflow-x-clip pt-24 md:pt-28">
         {children}
       </main>
-      <Contact />
+      <Contact content={content.contact} site={content.site} />
     </div>
   );
 }

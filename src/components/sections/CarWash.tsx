@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { CAR_WASH_INFO, formatZar } from "@/lib/menu";
+import { formatZar } from "@/lib/menu";
 import { AnalyticsEvents, trackEvent } from "@/lib/analytics";
+import type { CarWashContent } from "@/lib/content/types";
 
 function CarIcon({ kind }: { kind: "small" | "medium" | "large" }) {
   const w = kind === "small" ? 40 : kind === "medium" ? 48 : 56;
@@ -37,7 +38,13 @@ const TIER_ICON: Record<string, "small" | "medium" | "large"> = {
   suv: "large",
 };
 
-export function CarWash({ asPage = false }: { asPage?: boolean }) {
+export function CarWash({
+  asPage = false,
+  content,
+}: {
+  asPage?: boolean;
+  content: CarWashContent;
+}) {
   const Title = asPage ? "h1" : "h2";
 
   return (
@@ -60,23 +67,22 @@ export function CarWash({ asPage = false }: { asPage?: boolean }) {
           className="mx-auto max-w-2xl text-center"
         >
           <p className="text-xs tracking-[0.32em] text-eoe-espresso">
-            EOE CAR WASH
+            {content.eyebrow}
           </p>
           <Title className="mt-3 font-display text-4xl tracking-[0.14em] text-eoe-espresso md:text-5xl">
-            Car wash
+            {content.title}
           </Title>
           <p className="mt-3 font-display text-2xl italic tracking-wide text-eoe-espresso/80">
-            {CAR_WASH_INFO.tagline}
+            {content.tagline}
           </p>
           <p className="mx-auto mt-5 max-w-lg text-sm leading-relaxed text-eoe-ink/80 md:text-base">
-            {CAR_WASH_INFO.note} A standard wash while you are at the table.
-            Pre-book with your café reservation so we can hold a bay for you.
+            {content.note}
           </p>
         </motion.div>
 
         {/* Pricing tiers */}
         <div className="mt-14 grid gap-4 sm:grid-cols-3">
-          {CAR_WASH_INFO.pricing.map((tier, i) => (
+          {content.pricing.map((tier, i) => (
             <motion.div
               key={tier.id}
               initial={{ opacity: 0, y: 20 }}
@@ -114,19 +120,18 @@ export function CarWash({ asPage = false }: { asPage?: boolean }) {
           <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="text-[11px] uppercase tracking-[0.28em] text-eoe-ivory/65">
-                Standard wash
+                {content.includesEyebrow}
               </p>
               <p className="mt-2 font-display text-2xl italic tracking-wide text-eoe-ivory/90">
-                Includes
+                {content.includesTitle}
               </p>
             </div>
             <p className="max-w-sm text-xs leading-relaxed text-eoe-ivory/70 md:text-right">
-              Every wash is finished by hand with the same care we bring to the
-              table.
+              {content.includesIntro}
             </p>
           </div>
           <ul className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {CAR_WASH_INFO.includes.map((item) => (
+            {content.includes.map((item) => (
               <li key={item.title} className="border-t border-eoe-ivory/20 pt-4">
                 <p className="text-sm font-medium tracking-wide">{item.title}</p>
                 <p className="mt-1 text-xs text-eoe-ivory/65">{item.detail}</p>
@@ -145,36 +150,36 @@ export function CarWash({ asPage = false }: { asPage?: boolean }) {
         >
           <div className="max-w-xl">
             <p className="text-[11px] uppercase tracking-[0.22em] text-eoe-espresso/75">
-              Reservations only
+              {content.reservationEyebrow}
             </p>
             <p className="mt-2 text-sm leading-relaxed text-eoe-ink/80">
-              {CAR_WASH_INFO.reservation}
+              {content.reservation}
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
             <Link
-              href="/#booking"
+              href={content.bookCta.href}
               onClick={() =>
                 trackEvent(AnalyticsEvents.CtaBook, { source: "car_wash" })
               }
               className="inline-flex min-h-11 shrink-0 rounded-full bg-eoe-espresso px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-ivory hover:bg-eoe-espresso/90"
             >
-              Book café + wash
+              {content.bookCta.label}
             </Link>
             <Link
-              href="/menu"
+              href={content.menuCta.href}
               onClick={() =>
                 trackEvent(AnalyticsEvents.CtaMenu, { source: "car_wash" })
               }
               className="inline-flex min-h-11 shrink-0 rounded-full border border-eoe-espresso/25 px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-eoe-espresso hover:bg-eoe-espresso/5"
             >
-              See the menu
+              {content.menuCta.label}
             </Link>
           </div>
         </motion.div>
 
         <p className="mt-8 text-center font-display text-lg italic tracking-wide text-eoe-espresso/65">
-          Thank you for your support.
+          {content.thanks}
         </p>
       </div>
     </section>

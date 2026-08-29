@@ -1,6 +1,7 @@
 import {
   carWashMinimumCents,
   isCarWashService,
+  type CarTypeCatalog,
 } from "./car-wash";
 
 /** Flat fee added to every paid online booking (Yoco checkout). */
@@ -15,10 +16,11 @@ export function bookingDepositCents(opts: {
   guests: number;
   serviceSlug: string;
   carTypes?: string[] | null;
+  carTypeCatalog?: CarTypeCatalog;
 }): number {
   const guestPart = opts.priceCents * Math.max(1, opts.guests);
   const washPart = isCarWashService(opts.serviceSlug)
-    ? carWashMinimumCents(opts.carTypes ?? [])
+    ? carWashMinimumCents(opts.carTypes ?? [], opts.carTypeCatalog)
     : 0;
   return guestPart + washPart + PLATFORM_FEE_CENTS;
 }

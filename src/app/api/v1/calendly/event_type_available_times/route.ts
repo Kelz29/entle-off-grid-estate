@@ -1,9 +1,21 @@
 import { NextResponse } from "next/server";
-import { getActiveBusiness, getService } from "@/lib/calendly/repository";
+import {
+  getActiveBusiness,
+  getActiveBookingsForService,
+  getService,
+} from "@/lib/calendly/repository";
 import { getAvailableSlots } from "@/lib/calendly/availability";
 import { serializeAvailableTime } from "@/lib/calendly/serializers";
 import { serviceIdFromEventType, BadEventTypeError } from "@/lib/calendly/config";
 import { parseIsoAssumeUtc } from "@/lib/calendly/time";
+import {
+  degradedAvailableSlots,
+  rememberBookingSnapshot,
+  snapshotAgeMs,
+  snapshotBusiness,
+  snapshotService,
+} from "@/lib/calendly/booking-snapshot";
+import { isDbConnectivityError, logBookingApiError } from "@/lib/api-errors";
 
 const SEVEN_DAYS_MS = 7 * 86_400_000;
 
@@ -40,7 +52,6 @@ export async function GET(request: Request) {
     );
   }
 
-  // Window rules (CALENDLY_API.md §2.3).
   if (end <= start) {
     return NextResponse.json(
       { detail: "end_time must be after start_time" },
@@ -60,26 +71,76 @@ export async function GET(request: Request) {
     );
   }
 
-  const service = await getService(serviceId);
-  if (!service) {
-    return NextResponse.json({ detail: "Event type not found" }, { status: 404 });
-  }
-  const business = await getActiveBusiness(service.business_id);
-  if (!business) {
-    return NextResponse.json({ detail: "Business not found" }, { status: 404 });
-  }
+  try {
+    const service = await getService(serviceId);
+    if (!service) {
+      return NextResponse.json({ detail: "Event type not found" }, { status: 404 });
+    }
+    const business = await getActiveBusiness(service.business_id);
+    if (!business) {
+      return NextResponse.json({ detail: "Business not found" }, { status: 404 });
+    }
 
-  const slots = await getAvailableSlots({
-    business,
-    service,
-    windowStart: start,
-    windowEnd: end,
-  });
+    const booked = await getActiveBookingsForService(
+      service.id,
+      start,
+      end
+    );
+    rememberBookingSnapshot({
+      bookedForService: {
+        serviceId: service.id,
+        rows: booked,
+        from: start,
+        to: end,
+      },
+    });
 
-  // Note: availability responses have NO pagination envelope (§2.3).
-  return NextResponse.json({
-    collection: slots.map((slot) =>
-      serializeAvailableTime(slot.start, slot.remaining, service, business)
-    ),
-  });
+    const slots = await getAvailableSlots({
+      business,
+      service,
+      windowStart: start,
+      windowEnd: end,
+    });
+
+    return NextResponse.json({
+      collection: slots.map((slot) =>
+        serializeAvailableTime(slot.start, slot.remaining, service, business)
+      ),
+      degraded: false,
+    });
+  } catch (err) {
+    logBookingApiError("event_type_available_times", err);
+    if (!isDbConnectivityError(err)) {
+      return NextResponse.json(
+        { detail: "Unable to load available times." },
+        { status: 503 }
+      );
+    }
+
+    const service = snapshotService(serviceId);
+    const business =
+      service ? snapshotBusiness(service.business_id) : null;
+    if (!service || !business) {
+      return NextResponse.json(
+        { detail: "Unable to load available times." },
+        { status: 503 }
+      );
+    }
+
+    const slots = degradedAvailableSlots({
+      business,
+      service,
+      windowStart: start,
+      windowEnd: end,
+    });
+    const age = snapshotAgeMs();
+
+    return NextResponse.json({
+      collection: slots.map((slot) =>
+        serializeAvailableTime(slot.start, slot.remaining, service, business)
+      ),
+      degraded: true,
+      snapshot_age_ms: age,
+    });
+  }
 }

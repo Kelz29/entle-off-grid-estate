@@ -1,11 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import Image from "next/image";
+import { ContentImage } from "@/components/ui/ContentImage";
+import { ContentVideo } from "@/components/ui/ContentVideo";
 
-// A portrait media surface that shows a poster image, and plays a muted preview
-// of the video on hover (pointer devices). The parent sizes it (relative + h/w)
-// and supplies overlay children (title) + an onClick (usually: open lightbox).
 export function HoverVideo({
   src,
   poster,
@@ -13,6 +11,8 @@ export function HoverVideo({
   className = "",
   children,
   onClick,
+  fallbackSrc,
+  posterFallback,
 }: {
   src: string;
   poster: string;
@@ -20,6 +20,8 @@ export function HoverVideo({
   className?: string;
   children?: React.ReactNode;
   onClick?: () => void;
+  fallbackSrc?: string;
+  posterFallback?: string;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -46,10 +48,18 @@ export function HoverVideo({
       onMouseLeave={stop}
       onClick={onClick}
     >
-      <Image src={poster} alt={alt} fill sizes="40vw" className="object-cover" />
-      <video
+      <ContentImage
+        src={poster}
+        fallbackSrc={posterFallback ?? poster}
+        alt={alt}
+        fill
+        sizes="40vw"
+        className="object-cover"
+      />
+      <ContentVideo
         ref={ref}
         src={src}
+        fallbackSrc={fallbackSrc ?? src}
         muted
         loop
         playsInline

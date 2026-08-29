@@ -8,6 +8,7 @@ export type AdminSection =
   | "payments"
   | "clients"
   | "specials"
+  | "content"
   | "seats"
   | "users";
 
@@ -24,7 +25,7 @@ export const ADMIN_ROLES: {
   {
     id: "manager",
     label: "Manager",
-    hint: "Bookings, payments, clients, specials, and seats",
+    hint: "Bookings, payments, clients, specials, site, and seats",
   },
   {
     id: "staff",
@@ -40,6 +41,7 @@ const SECTION_ACCESS: Record<AdminRole, readonly AdminSection[]> = {
     "payments",
     "clients",
     "specials",
+    "content",
     "seats",
     "users",
   ],
@@ -49,6 +51,7 @@ const SECTION_ACCESS: Record<AdminRole, readonly AdminSection[]> = {
     "payments",
     "clients",
     "specials",
+    "content",
     "seats",
   ],
   staff: ["overview", "bookings"],
@@ -75,6 +78,10 @@ export function canManageSeats(role: AdminRole): boolean {
 }
 
 export function canManageSpecials(role: AdminRole): boolean {
+  return role === "owner" || role === "manager";
+}
+
+export function canManageContent(role: AdminRole): boolean {
   return role === "owner" || role === "manager";
 }
 
