@@ -80,6 +80,27 @@ function isOpenDay(d: Date) {
   return [0, 5, 6].includes(d.getDay());
 }
 
+const VENUE_TZ = "Africa/Johannesburg";
+
+function venueTodayKey() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: VENUE_TZ }).format(
+    new Date()
+  );
+}
+
+function isOpenDayKey(key: string) {
+  const d = new Date(`${key}T12:00:00Z`);
+  return [0, 5, 6].includes(d.getUTCDay());
+}
+
+/** Venue "today" as a local calendar date for the picker (Fri–Sun only). */
+function defaultOpenDay(): Date | null {
+  const key = venueTodayKey();
+  if (!isOpenDayKey(key)) return null;
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 const FRIENDLY_LOAD_MSG =
   "We're having trouble loading live availability — showing the last schedule we know.";
 
@@ -121,7 +142,7 @@ export function Booking({
   const [degradedMode, setDegradedMode] = useState(false);
   const [service, setService] = useState<EventType | null>(null);
 
-  const [date, setDate] = useState<Date | null>(null);
+  const [date, setDate] = useState<Date | null>(() => defaultOpenDay());
   const [slots, setSlots] = useState<AvailableTime[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slot, setSlot] = useState<AvailableTime | null>(null);
@@ -286,6 +307,13 @@ export function Booking({
   useEffect(() => {
     if (service && date) loadSlots(service, date);
   }, [service, date, loadSlots]);
+
+  // On open days, pre-select venue today when entering the slot step.
+  useEffect(() => {
+    if (step !== "slot" || !service || date) return;
+    const d = defaultOpenDay();
+    if (d) setDate(d);
+  }, [step, service, date]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -562,6 +590,10 @@ export function Booking({
                     setService(s);
                     setCarTypes([DEFAULT_CAR_TYPE]);
                     setError(null);
+                    if (!date) {
+                      const d = defaultOpenDay();
+                      if (d) setDate(d);
+                    }
                     setStep("slot");
                     trackEvent(AnalyticsEvents.BookingExperienceSelected, {
                       service: s.name,
@@ -1156,6 +1188,7 @@ function SlotStep({
             selected={date}
             onChange={onDate}
             minDate={new Date()}
+            openToDate={date ?? defaultOpenDay() ?? new Date()}
             filterDate={isOpenDay}
             inline
           />
